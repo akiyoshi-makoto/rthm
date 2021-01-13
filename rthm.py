@@ -5,8 +5,10 @@ import time
 import RPi.GPIO as GPIO
 import busio
 import board
+from smbus2 import SMBus
 import adafruit_amg88xx
 import cv2
+import numpy as np
 import PIL.Image, PIL.ImageTk
 
 ############################################################
@@ -47,18 +49,30 @@ class Application(ttk.Frame):
     # ウィジットを生成
     ############################################################
     def create_widgets(self):
+        # フレーム(カメラ)
+        frame_camera = ttk.Frame(self)
+        frame_camera.grid(row=0, padx=10, pady=(10,0), sticky='NW')
         # ビデオカメラの映像を表示するキャンバスを用意する
-        self.canvas = Canvas(self, width=480, height=480)
-        self.canvas.pack(pady=10)
+        self.canvas = Canvas(frame_camera, width=480, height=480)
+        self.canvas.pack()
 
-        self.label_tgt_tmp = ttk.Label(self, text='体温：')
-        self.label_tgt_tmp.pack(pady=(5,0))
+        # フレーム(測定データ)
+        frame_data = ttk.Frame(self)
+        frame_data.grid(row=1, padx=10, pady=(10,0), sticky='NW')
+        self.label_tgt_tmp = ttk.Label(frame_data, text='体温：')
+        self.label_tgt_tmp.grid(row=0, sticky='NW')
 
-        self.label_env_tmp = ttk.Label(self, text='サーミスタ温度：')
-        self.label_env_tmp.pack(pady=(5,0))
+        self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
+        self.label_env_tmp.grid(row=2, sticky='NW')
 
-        self.label_distance = ttk.Label(self, text='対象物までの距離：')
-        self.label_distance.pack(pady=(5,0))
+        self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
+        self.label_max_tmp.grid(row=3, sticky='NW')
+
+        self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
+        self.label_distance.grid(row=4, sticky='NW')
+
+        self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
+        self.label_offset_tmp.grid(row=5, sticky='NW')
 
     ############################################################
     # デバイスの初期化
@@ -100,27 +114,66 @@ class Application(ttk.Frame):
         # Echoパルスのパルス幅(us)
         echo_pulse_width = (echo_off - echo_on) * 1000000
         # 距離を算出:Distance in cm = echo pulse width in uS/58
-        distance = echo_pulse_width / 58
+        self.distance = echo_pulse_width / 58
 
-        self.label_distance.config(text='対象物までの距離：' + str(round(distance)))
+        self.label_distance.config(text='対象物までの距離：' + str(round(self.distance)))
 
     ############################################################
     # デバイスの初期化(サーマルカメラ)
     ############################################################
     def init_thermal_camera(self):   
         # I2Cバスの初期化
-        self.i2c_bus = busio.I2C(board.SCL, board.SDA)
+        i2c_bus = busio.I2C(board.SCL, board.SDA)
+        self.i2c_adr = 0x68
+        # センサの初期化
+        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=self.i2c_adr)
+        # センサの初期化待ち
+        time.sleep(.1)
+
+        with SMBus(1) as i2c:
+            # AMG8833追加設定
+            # フレームレート(0x00:10fps, 0x01:1fps)
+            i2c.write_byte_data(self.i2c_adr, 0x02, 0x00)
+            # INT出力無効
+            i2c.write_byte_data(self.i2c_adr, 0x03, 0x00)
+            # 移動平均モードを有効
+            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x50)
+            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x45)
+            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x57)
+            i2c.write_byte_data(self.i2c_adr, 0x07, 0x20)
+            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x00)
+            # 移動平均モードを無効
+            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x50)
+            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x45)
+            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x57)
+            #i2c.write_byte_data(self.i2c_adr, 0x07, 0x00)
+            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x00)
 
     ############################################################
     # サーマルカメラ制御
     ############################################################
     def ctrl_thermal_camera(self):
-        # センサーの初期化：I2Cスレーブアドレス(0x68)
-        self.sensor = adafruit_amg88xx.AMG88XX(self.i2c_bus, addr=0x68)
-        # 8x8センサアレイ内の最大温度を取得
-        max_temp = max(max(self.sensor.pixels))
+        pixels_array = np.array(self.sensor.pixels)
+        pixels_ave = np.average(pixels_array)
+        pixels_max = np.amax(pixels_array[1:6,2:6])   
+        pixels_min = np.amin(pixels_array)
+        with SMBus(1) as i2c:
+            thermistor_temp = i2c.read_word_data(self.i2c_adr, 0xE)
+        thermistor_temp = thermistor_temp * 0.0625
+        offset_thrm = (-0.6857*thermistor_temp+27.187)  # 補正式
 
-        self.label_tgt_tmp.config(text='体温：' + str(round(max_temp)))
+        if self.distance <= 60:
+            offset_thrm = offset_thrm-((60-self.distance)*0.064)    # 補正式(対距離)
+         
+        offset_temp = offset_thrm
+        max_temp = round(pixels_max + offset_temp, 1)   #体温を算出
+
+        self.label_tgt_tmp.config(text='体温：' + str(max_temp) + ' ℃')
+        self.label_env_tmp.config(text='サーミスタ温度：' + str(thermistor_temp) + ' ℃')
+        self.label_max_tmp.config(text='最大温度：' + str(pixels_max) + ' ℃')
+        self.label_offset_tmp.config(text='オフセット値：' + str(offset_temp) + ' ℃')
+        
+        print(pixels_array)
 
     ############################################################
     # デバイスの初期化(ビデオカメラ)
@@ -176,6 +229,7 @@ class Application(ttk.Frame):
             self.after(1000,self.cycle_proc)
         else:
             # 終了処理
+            GPIO.cleanup()
             self.video_camera.release()
             # メインウインドウを閉じる
             close_main_window()
