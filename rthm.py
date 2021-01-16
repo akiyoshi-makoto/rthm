@@ -18,12 +18,15 @@ TRIG = 27
 ECHO = 22
 CYCLE_TIME = 1000       # 処理周期[msec]
 DISTANCE_DEFAULT = 50   # 対象物までの距離(デフォルト値)
+I2C_ADR = 0x68          # I2C アドレス
 
 ############################################################
 # オプション設定
 ############################################################
 # 超音波センサ(HC-SR04)
 ENABLE_ULTRA_SONIC_SENSOR = False   # True:有効 False:無効
+# サーマルカメラ(AMG8833)
+ENABLE_THERMAL_CAMERA = False        # True:有効 False:無効     
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
@@ -68,18 +71,22 @@ class Application(ttk.Frame):
         # フレーム(測定データ)
         frame_data = ttk.Frame(self)
         frame_data.grid(row=1, padx=10, pady=(10,0), sticky='NW')
-        self.label_tgt_tmp = ttk.Label(frame_data, text='体温：')
-        self.label_tgt_tmp.grid(row=0, sticky='NW')
 
-        self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
-        self.label_env_tmp.grid(row=2, sticky='NW')
+        # サーマルカメラ(AMG8833)
+        if ENABLE_THERMAL_CAMERA:
+            self.label_tgt_tmp = ttk.Label(frame_data, text='体温：')
+            self.label_tgt_tmp.grid(row=0, sticky='NW')
 
-        self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
-        self.label_max_tmp.grid(row=3, sticky='NW')
+            self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
+            self.label_env_tmp.grid(row=2, sticky='NW')
 
-        self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
-        self.label_offset_tmp.grid(row=5, sticky='NW')
-        
+            self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
+            self.label_max_tmp.grid(row=3, sticky='NW')
+
+            self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
+            self.label_offset_tmp.grid(row=5, sticky='NW')
+
+        # 超音波センサ(HC-SR04)
         if ENABLE_ULTRA_SONIC_SENSOR:
             self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
             self.label_distance.grid(row=4, sticky='NW')
@@ -94,7 +101,8 @@ class Application(ttk.Frame):
         else:
             self.distance = DISTANCE_DEFAULT    # 対象物までの距離
         # サーマルカメラ(AMG8833)
-        self.init_thermal_camera()
+        if ENABLE_THERMAL_CAMERA:
+            self.init_thermal_camera()
         # ビデオカメラ
         self.init_video_camera()
 
@@ -108,7 +116,8 @@ class Application(ttk.Frame):
             if ENABLE_ULTRA_SONIC_SENSOR:
                 self.ctrl_ultra_sonic_sensor()
             # サーマルカメラ(AMG8833)
-            self.ctrl_thermal_camera()
+            if ENABLE_THERMAL_CAMERA:
+                self.ctrl_thermal_camera()
             # ビデオカメラ
             self.ctrl_video_camera()
             # 周期処理
@@ -163,30 +172,29 @@ class Application(ttk.Frame):
     def init_thermal_camera(self):   
         # I2Cバスの初期化
         i2c_bus = busio.I2C(board.SCL, board.SDA)
-        self.i2c_adr = 0x68
         # センサの初期化
-        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=self.i2c_adr)
+        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
         # センサの初期化待ち
         time.sleep(.1)
 
         with SMBus(1) as i2c:
             # AMG8833追加設定
             # フレームレート(0x00:10fps, 0x01:1fps)
-            i2c.write_byte_data(self.i2c_adr, 0x02, 0x00)
+            i2c.write_byte_data(I2C_ADR, 0x02, 0x00)
             # INT出力無効
-            i2c.write_byte_data(self.i2c_adr, 0x03, 0x00)
+            i2c.write_byte_data(I2C_ADR, 0x03, 0x00)
             # 移動平均モードを有効
-            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x50)
-            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x45)
-            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x57)
-            i2c.write_byte_data(self.i2c_adr, 0x07, 0x20)
-            i2c.write_byte_data(self.i2c_adr, 0x1F, 0x00)
+            i2c.write_byte_data(I2C_ADR, 0x1F, 0x50)
+            i2c.write_byte_data(I2C_ADR, 0x1F, 0x45)
+            i2c.write_byte_data(I2C_ADR, 0x1F, 0x57)
+            i2c.write_byte_data(I2C_ADR, 0x07, 0x20)
+            i2c.write_byte_data(I2C_ADR, 0x1F, 0x00)
             # 移動平均モードを無効
-            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x50)
-            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x45)
-            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x57)
-            #i2c.write_byte_data(self.i2c_adr, 0x07, 0x00)
-            #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x00)
+            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x50)
+            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x45)
+            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x57)
+            #i2c.write_byte_data(I2C_ADR, 0x07, 0x00)
+            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x00)
 
     ############################################################
     # サーマルカメラ(AMG8833) 制御
@@ -197,7 +205,7 @@ class Application(ttk.Frame):
         pixels_max = np.amax(pixels_array[1:6,2:6])   
         pixels_min = np.amin(pixels_array)
         with SMBus(1) as i2c:
-            thermistor_temp = i2c.read_word_data(self.i2c_adr, 0xE)
+            thermistor_temp = i2c.read_word_data(I2C_ADR, 0xE)
         thermistor_temp = thermistor_temp * 0.0625
         offset_thrm = (-0.6857*thermistor_temp+27.187)  # 補正式
 
