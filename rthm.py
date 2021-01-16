@@ -21,14 +21,6 @@ DISTANCE_DEFAULT = 50       # 対象物までの距離(デフォルト値)
 I2C_ADR = 0x68              # I2C アドレス
 FACE_DETECTIION_PAUSE = 40  # 顔検出時の一時停止周期
 
-##############################################################################
-# オプション設定 True:有効 False:無効
-##############################################################################
-# 超音波センサ(HC-SR04)
-ENABLE_ULTRA_SONIC_SENSOR = False
-# サーマルカメラ(AMG8833)
-ENABLE_THERMAL_CAMERA = True     
-
 class Application(ttk.Frame):
     def __init__(self, master=None):
         ttk.Frame.__init__(self, master)
@@ -39,7 +31,8 @@ class Application(ttk.Frame):
 
         self.cycle_proc_exec = True     # 周期処理実行許可フラグ(True:許可 False:禁止)
         self.pause_timer = 0            # 顔検出時の一時停止タイマ 
-        self.thermal_exec = False       # サーマルカメラ実行要求フラグ(True:要求有 False:要求無)
+        self.face_detection = False     # 顔検出フラグ(True:検出した False:検出していない)
+        self.distance = 60.0
 
         # ウィジットを生成
         self.create_widgets()
@@ -78,125 +71,32 @@ class Application(ttk.Frame):
         frame_data.grid(row=1, padx=10, pady=(10,0), sticky='NW')
 
         # サーマルカメラ(AMG8833)
-        if ENABLE_THERMAL_CAMERA:
-            self.label_tgt_tmp = ttk.Label(frame_data, text='体温：')
-            self.label_tgt_tmp.grid(row=0, sticky='NW')
+        self.label_tgt_tmp = ttk.Label(frame_data, text='体温：')
+        self.label_tgt_tmp.grid(row=0, sticky='NW')
 
-            self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
-            self.label_env_tmp.grid(row=2, sticky='NW')
+        self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
+        self.label_env_tmp.grid(row=2, sticky='NW')
 
-            self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
-            self.label_max_tmp.grid(row=3, sticky='NW')
+        self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
+        self.label_max_tmp.grid(row=3, sticky='NW')
 
-            self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
-            self.label_offset_tmp.grid(row=5, sticky='NW')
+        self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
+        self.label_offset_tmp.grid(row=5, sticky='NW')
 
         # 超音波センサ(HC-SR04)
-        if ENABLE_ULTRA_SONIC_SENSOR:
-            self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
-            self.label_distance.grid(row=4, sticky='NW')
+        self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
+        self.label_distance.grid(row=4, sticky='NW')
 
     ##########################################################################
     # デバイスの初期化
     ##########################################################################
     def init_device(self):   
-        # 超音波センサ(HC-SR04)
-        if ENABLE_ULTRA_SONIC_SENSOR:
-            self.init_ultra_sonic_sensor()
-        else:
-            self.distance = DISTANCE_DEFAULT
-        # サーマルカメラ(AMG8833)
-        if ENABLE_THERMAL_CAMERA:
-            self.init_thermal_camera()
         # ビデオカメラ
         self.init_video_camera()
-
-    ##########################################################################
-    # 超音波センサ(HC-SR04) 初期化
-    ##########################################################################
-    def init_ultra_sonic_sensor(self):
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(TRIG, GPIO.OUT)
-        GPIO.setup(ECHO, GPIO.IN)
-        GPIO.output(TRIG, GPIO.LOW)
-
-    ##########################################################################
-    # 超音波センサ(HC-SR04) 制御
-    ##########################################################################
-    def ctrl_ultra_sonic_sensor(self):
-        # Trig端子を10us以上High
-        GPIO.output(TRIG, GPIO.HIGH)
-        time.sleep(0.00001)
-        GPIO.output(TRIG, GPIO.LOW)
-        # EchoパルスがHighになる時間
-        while GPIO.input(ECHO) == 0:
-            echo_on = time.time()
-        # EchoパルスがLowになる時間
-        while GPIO.input(ECHO) == 1:
-            echo_off = time.time()
-        # Echoパルスのパルス幅(us)
-        echo_pulse_width = (echo_off - echo_on) * 1000000
-        # 距離を算出:Distance in cm = echo pulse width in uS/58
-        self.distance = echo_pulse_width / 58
-
-        self.label_distance.config(text='対象物までの距離：' + str(round(self.distance)))
-
-    ##########################################################################
-    # サーマルカメラ(AMG8833) 初期化
-    ##########################################################################
-    def init_thermal_camera(self):   
-        # I2Cバスの初期化
-        i2c_bus = busio.I2C(board.SCL, board.SDA)
-        # センサの初期化
-        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
-        # センサの初期化待ち
-        time.sleep(.1)
-
-        with SMBus(1) as i2c:
-            # AMG8833追加設定
-            # フレームレート(0x00:10fps, 0x01:1fps)
-            i2c.write_byte_data(I2C_ADR, 0x02, 0x00)
-            # INT出力無効
-            i2c.write_byte_data(I2C_ADR, 0x03, 0x00)
-            # 移動平均モードを有効
-            i2c.write_byte_data(I2C_ADR, 0x1F, 0x50)
-            i2c.write_byte_data(I2C_ADR, 0x1F, 0x45)
-            i2c.write_byte_data(I2C_ADR, 0x1F, 0x57)
-            i2c.write_byte_data(I2C_ADR, 0x07, 0x20)
-            i2c.write_byte_data(I2C_ADR, 0x1F, 0x00)
-            # 移動平均モードを無効
-            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x50)
-            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x45)
-            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x57)
-            #i2c.write_byte_data(I2C_ADR, 0x07, 0x00)
-            #i2c.write_byte_data(I2C_ADR, 0x1F, 0x00)
-
-    ##########################################################################
-    # サーマルカメラ(AMG8833) 制御
-    ##########################################################################
-    def ctrl_thermal_camera(self):
-        pixels_array = np.array(self.sensor.pixels)
-        pixels_ave = np.average(pixels_array)
-        pixels_max = np.amax(pixels_array[1:6,2:6])   
-        pixels_min = np.amin(pixels_array)
-        with SMBus(1) as i2c:
-            thermistor_temp = i2c.read_word_data(I2C_ADR, 0xE)
-        thermistor_temp = thermistor_temp * 0.0625
-        offset_thrm = (-0.6857*thermistor_temp+27.187)  # 補正式
-
-        if self.distance <= 60:
-            offset_thrm = offset_thrm-((60-self.distance)*0.064)    # 補正式(対距離)
-         
-        offset_temp = offset_thrm
-        max_temp = round(pixels_max + offset_temp, 1)   #体温を算出
-
-        self.label_tgt_tmp.config(text='体温：' + str(max_temp) + ' ℃')
-        self.label_env_tmp.config(text='サーミスタ温度：' + str(thermistor_temp) + ' ℃')
-        self.label_max_tmp.config(text='最大温度：' + str(pixels_max) + ' ℃')
-        self.label_offset_tmp.config(text='オフセット値：' + str(offset_temp) + ' ℃')
-        
-        print(pixels_array)
+        # 超音波センサ(HC-SR04)
+        self.init_ultra_sonic_sensor()
+        # サーマルカメラ(AMG8833)
+        self.init_thermal_camera()
 
     ##########################################################################
     # ビデオカメラ　初期化
@@ -236,8 +136,8 @@ class Application(ttk.Frame):
                 if len(facerect) > 0:
                     # 一時停止してその間にサーマルカメラ制御を実行する
                     self.pause_timer = FACE_DETECTIION_PAUSE
-                    # サーマルカメラ実行要求
-                    self.thermal_exec = True
+                    # 顔検出フラグセット
+                    self.face_detection = True
                     # 検出した場所すべてに緑色で枠を描画する
                     for rect in facerect:
                         cv2.rectangle(frame_color,
@@ -246,7 +146,6 @@ class Application(ttk.Frame):
                                       (0, 255, 0),
                                       thickness=3)
 
-                    print(facerect)
                 else:
                     self.pause_timer = 0
 
@@ -256,19 +155,90 @@ class Application(ttk.Frame):
                 self.canvas.create_image(0, 0, image = self.photo, anchor = 'nw')
 
     ##########################################################################
+    # 超音波センサ(HC-SR04) 初期化
+    ##########################################################################
+    def init_ultra_sonic_sensor(self):
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(TRIG, GPIO.OUT)
+        GPIO.setup(ECHO, GPIO.IN)
+        GPIO.output(TRIG, GPIO.LOW)
+
+    ##########################################################################
+    # 超音波センサ(HC-SR04) 制御
+    ##########################################################################
+    def ctrl_ultra_sonic_sensor(self):
+
+        if self.face_detection: 
+            # Trig端子を10us以上High
+            GPIO.output(TRIG, GPIO.HIGH)
+            time.sleep(0.00001)
+            GPIO.output(TRIG, GPIO.LOW)
+            # EchoパルスがHighになる時間
+            while GPIO.input(ECHO) == 0:
+                echo_on = time.time()
+            # EchoパルスがLowになる時間
+            while GPIO.input(ECHO) == 1:
+                echo_off = time.time()
+            # Echoパルスのパルス幅(us)
+            echo_pulse_width = (echo_off - echo_on) * 1000000
+            # 距離を算出:Distance in cm = echo pulse width in uS/58
+            self.distance = echo_pulse_width / 58
+            self.label_distance.config(text='対象物までの距離：' + str(round(self.distance)) + ' cm' )
+
+    ##########################################################################
+    # サーマルカメラ(AMG8833) 初期化
+    ##########################################################################
+    def init_thermal_camera(self):   
+        # I2Cバスの初期化
+        i2c_bus = busio.I2C(board.SCL, board.SDA)
+        # センサの初期化
+        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
+        # センサの初期化待ち
+        time.sleep(.1)
+
+    ##########################################################################
+    # サーマルカメラ(AMG8833) 制御
+    ##########################################################################
+    def ctrl_thermal_camera(self):
+        
+        if self.face_detection: 
+            # 顔検フラグをクリア
+            self.face_detection = False
+            # サーミスタ温度
+            thermistor_temp = self.sensor.temperature
+            #
+            pixels_array = np.array(self.sensor.pixels)
+            pixels_ave = np.average(pixels_array)
+            pixels_max = np.amax(pixels_array[1:6,2:6])   
+            pixels_min = np.amin(pixels_array)
+            offset_thrm = (-0.6857*thermistor_temp+27.187)  # 補正式
+
+            if self.distance <= 60.0:
+                offset_thrm = offset_thrm-((60-self.distance)*0.064)    # 補正式(対距離)
+            
+            offset_temp = offset_thrm
+            max_temp = round(pixels_max + offset_temp, 1)   #体温を算出
+
+            self.label_tgt_tmp.config(text='体温：' + str(max_temp) + ' ℃')
+            self.label_env_tmp.config(text='サーミスタ温度：' + str(thermistor_temp) + ' ℃')
+            self.label_max_tmp.config(text='最大温度：' + str(pixels_max) + ' ℃')
+            self.label_offset_tmp.config(text='オフセット値：' + str(offset_temp) + ' ℃')
+            
+            print(pixels_array)
+
+    ##########################################################################
     # 周期処理
     ##########################################################################
     def cycle_proc(self):
         # 周期処理実行許可
         if self.cycle_proc_exec:
-            # 超音波センサ(HC-SR04)
-            if ENABLE_ULTRA_SONIC_SENSOR:
-                self.ctrl_ultra_sonic_sensor()
-            # サーマルカメラ(AMG8833)
-            if ENABLE_THERMAL_CAMERA:
-                self.ctrl_thermal_camera()
             # ビデオカメラ
             self.ctrl_video_camera()
+            # 超音波センサ(HC-SR04)
+            self.ctrl_ultra_sonic_sensor()
+            # サーマルカメラ(AMG8833)
+            self.ctrl_thermal_camera()
             # 周期処理
             self.after(CYCLE_TIME, self.cycle_proc)
 
@@ -279,9 +249,8 @@ class Application(ttk.Frame):
         # 周期処理実行禁止
         self.cycle_proc_exec = False
         # 終了処理
-        if ENABLE_ULTRA_SONIC_SENSOR:
-            GPIO.cleanup()
         self.video_camera.release()
+        GPIO.cleanup()
         # メインウインドウを閉じる
         self.master.destroy()
 
