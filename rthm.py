@@ -16,9 +16,10 @@ import PIL.Image, PIL.ImageTk
 ############################################################
 TRIG = 27
 ECHO = 22
-CYCLE_TIME = 100        # 処理周期[msec]
-DISTANCE_DEFAULT = 50   # 対象物までの距離(デフォルト値)
-I2C_ADR = 0x68          # I2C アドレス
+CYCLE_TIME = 100            # 処理周期[msec]
+DISTANCE_DEFAULT = 50       # 対象物までの距離(デフォルト値)
+I2C_ADR = 0x68              # I2C アドレス
+FACE_DETECTIION_PAUSE = 10  # 顔検出時の一時停止周期
 
 ############################################################
 # オプション設定
@@ -26,9 +27,9 @@ I2C_ADR = 0x68          # I2C アドレス
 # 超音波センサ(HC-SR04)
 ENABLE_ULTRA_SONIC_SENSOR = False   # True:有効 False:無効
 # サーマルカメラ(AMG8833)
-ENABLE_THERMAL_CAMERA = False       # True:有効 False:無効     
+ENABLE_THERMAL_CAMERA = True       # True:有効 False:無効     
 # 顔検出制御
-ENABLE_FACE_DETECTIION = False      # True:有効 False:無効
+ENABLE_FACE_DETECTIION = True       # True:有効 False:無効
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
@@ -232,32 +233,50 @@ class Application(ttk.Frame):
         self.video_camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
         self.video_camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
+        # 顔検出のための学習元データを読み込む
+        if ENABLE_FACE_DETECTIION:
+            self.pause_timer = 0        # 顔検出時の一時停止タイマ 
+            self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
+
     ############################################################
     # ビデオカメラ 制御
     ############################################################
     def ctrl_video_camera(self):
-        # ビデオカメラの停止画を取得
-        _, frame = self.video_camera.read()
-        frame_color = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if self.video_camera.isOpened():
+            # ビデオカメラの停止画を取得
+            _, frame = self.video_camera.read()
+            # 左右反転
+            frame_mirror = cv2.flip(frame, 1)
+            # OpenCV(BGR) -> Pillow(RGB)変換
+            frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
         
-        # 顔検出制御
-        if ENABLE_FACE_DETECTIION:
-            # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
-            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # 顔検出のための学習元データを読み込む
-            face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
-            # 顔検出を行う
-            facerect = face_cascade.detectMultiScale(frame_gray, scaleFactor=1.2, minNeighbors=2, minSize=(100, 100))
-            # 顔が検出された場合
-            if len(facerect) > 0:
-                # 検出した場所すべてに青色で枠を描画する
-                for rect in facerect:
-                    cv2.rectangle(frame_color, tuple(rect[0:2]), tuple(rect[0:2]+rect[2:4]), (0, 0, 255), thickness=3)
+            # 顔検出制御
+            if ENABLE_FACE_DETECTIION:
+                if self.pause_timer > 0:
+                    self.pause_timer -= 1
+                else:
+                    # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
+                    frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
+                    # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
+                    facerect = self.face_cascade.detectMultiScale(frame_gray, scaleFactor=1.2, minNeighbors=2, minSize=(350, 350))
+                    # 顔が検出された場合
+                    if len(facerect) > 0:
+                        print(facerect)
+                        self.pause_timer = FACE_DETECTIION_PAUSE
+                        # 検出した場所すべてに緑色で枠を描画する
+                        for rect in facerect:
+                            cv2.rectangle(frame_color, tuple(rect[0:2]), tuple(rect[0:2]+rect[2:4]), (0, 255, 0), thickness=3)
+                    
+                    # OpenCV frame -> Pillow Photo
+                    self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
+                    # Pillow Photo -> Canvas
+                    self.canvas.create_image(0, 0, image = self.photo, anchor = 'nw')
 
-        # OpenCV frame -> Pillow Photo
-        self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
-        # Pillow Photo -> Canvas
-        self.canvas.create_image(0, 0, image = self.photo, anchor = 'nw')
+            else:
+                # OpenCV frame -> Pillow Photo
+                self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
+                # Pillow Photo -> Canvas
+                self.canvas.create_image(0, 0, image = self.photo, anchor = 'nw')
 
 if __name__ == '__main__':
     root = Tk()
