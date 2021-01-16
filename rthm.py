@@ -16,10 +16,19 @@ import PIL.Image, PIL.ImageTk
 ############################################################
 TRIG = 27
 ECHO = 22
+CYCLE_TIME = 1000       # 処理周期[msec]
+DISTANCE_DEFAULT = 50   # 対象物までの距離(デフォルト値)
+
+############################################################
+# オプション設定
+############################################################
+# 超音波センサ(HC-SR04)
+ENABLE_ULTRA_SONIC_SENSOR = False   # True:有効 False:無効
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
         ttk.Frame.__init__(self, master)
+        self.master = master
         self.pack()
         # ウィンドウをスクリーンの中央に配置
         self.setting_window(master)
@@ -68,37 +77,67 @@ class Application(ttk.Frame):
         self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
         self.label_max_tmp.grid(row=3, sticky='NW')
 
-        self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
-        self.label_distance.grid(row=4, sticky='NW')
-
         self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
         self.label_offset_tmp.grid(row=5, sticky='NW')
+        
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
+            self.label_distance.grid(row=4, sticky='NW')
 
     ############################################################
     # デバイスの初期化
     ############################################################
     def init_device(self):   
-        # GPIO
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        # 超音波センサ
-        self.init_ultra_sonic_sensor()
-        # サーマルカメラ
+        # 超音波センサ(HC-SR04)
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            self.init_ultra_sonic_sensor()
+        else:
+            self.distance = DISTANCE_DEFAULT    # 対象物までの距離
+        # サーマルカメラ(AMG8833)
         self.init_thermal_camera()
         # ビデオカメラ
         self.init_video_camera()
 
     ############################################################
-    # デバイスの初期化(超音波センサ)
+    # 周期処理
+    ############################################################
+    def cycle_proc(self):
+        # 周期処理実行許可
+        if self.cycle_proc_exec:
+            # 超音波センサ(HC-SR04)
+            if ENABLE_ULTRA_SONIC_SENSOR:
+                self.ctrl_ultra_sonic_sensor()
+            # サーマルカメラ(AMG8833)
+            self.ctrl_thermal_camera()
+            # ビデオカメラ
+            self.ctrl_video_camera()
+            # 周期処理
+            self.after(CYCLE_TIME, self.cycle_proc)
+
+    ############################################################
+    # 閉じるボタンが押下された場合の処理
+    ############################################################
+    def on_close_button(self):
+        # 周期処理実行禁止
+        self.cycle_proc_exec = False
+        # 終了処理
+        GPIO.cleanup()
+        self.video_camera.release()
+        # メインウインドウを閉じる
+        self.master.destroy()
+
+    ############################################################
+    # 超音波センサ(HC-SR04) 初期化
     ############################################################
     def init_ultra_sonic_sensor(self):
-        # GPIO端子の初期設定
-        GPIO.setup(TRIG,GPIO.OUT)
-        GPIO.setup(ECHO,GPIO.IN)
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(TRIG, GPIO.OUT)
+        GPIO.setup(ECHO, GPIO.IN)
         GPIO.output(TRIG, GPIO.LOW)
 
     ############################################################
-    # 超音波センサ制御
+    # 超音波センサ(HC-SR04) 制御
     ############################################################
     def ctrl_ultra_sonic_sensor(self):
         # Trig端子を10us以上High
@@ -119,7 +158,7 @@ class Application(ttk.Frame):
         self.label_distance.config(text='対象物までの距離：' + str(round(self.distance)))
 
     ############################################################
-    # デバイスの初期化(サーマルカメラ)
+    # サーマルカメラ(AMG8833) 初期化
     ############################################################
     def init_thermal_camera(self):   
         # I2Cバスの初期化
@@ -150,7 +189,7 @@ class Application(ttk.Frame):
             #i2c.write_byte_data(self.i2c_adr, 0x1F, 0x00)
 
     ############################################################
-    # サーマルカメラ制御
+    # サーマルカメラ(AMG8833) 制御
     ############################################################
     def ctrl_thermal_camera(self):
         pixels_array = np.array(self.sensor.pixels)
@@ -176,7 +215,7 @@ class Application(ttk.Frame):
         print(pixels_array)
 
     ############################################################
-    # デバイスの初期化(ビデオカメラ)
+    # ビデオカメラ　初期化
     ############################################################
     def init_video_camera(self):   
         self.video_camera = cv2.VideoCapture(0)
@@ -184,7 +223,7 @@ class Application(ttk.Frame):
         self.video_camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     ############################################################
-    # ビデオカメラ制御
+    # ビデオカメラ 制御
     ############################################################
     def ctrl_video_camera(self):
         # ビデオカメラの停止画を取得
@@ -205,40 +244,6 @@ class Application(ttk.Frame):
         self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_orgn))
         # Pillow Photo -> Canvas
         self.canvas.create_image(0, 0, image = self.photo, anchor = 'nw')
-
-    ############################################################
-    # 閉じるボタンが押下された場合の処理
-    ############################################################
-    def on_close_button(self):
-        # 周期処理を停止、終了処理後、メインウインドウを閉じる
-        self.cycle_proc_exec = False
-
-    ############################################################
-    # 周期処理
-    ############################################################
-    def cycle_proc(self):
-        # 周期処理実行許可
-        if self.cycle_proc_exec:
-            # 超音波センサ
-            self.ctrl_ultra_sonic_sensor()
-            # サーマルカメラ制御
-            self.ctrl_thermal_camera()
-            # ビデオカメラ制御
-            self.ctrl_video_camera()
-            # 1000ms後に遅れて処理
-            self.after(1000,self.cycle_proc)
-        else:
-            # 終了処理
-            GPIO.cleanup()
-            self.video_camera.release()
-            # メインウインドウを閉じる
-            close_main_window()
-
-############################################################
-# メインウインドウを閉じる
-############################################################
-def close_main_window():
-    root.destroy()
 
 if __name__ == '__main__':
     root = Tk()
