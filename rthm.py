@@ -16,7 +16,6 @@ import PIL.Image, PIL.ImageTk
 TRIG = 27
 ECHO = 22
 CYCLE_TIME = 50             # 処理周期[msec]
-DISTANCE_DEFAULT = 50       # 対象物までの距離(デフォルト値)
 I2C_ADR = 0x68              # I2C アドレス
 FACE_DETECTIION_PAUSE = 40  # 顔検出時の一時停止周期
 
@@ -58,30 +57,36 @@ class Application(ttk.Frame):
     # ウィジットを生成
     ##########################################################################
     def create_widgets(self):
-        # フレーム(カメラ)
-        frame_camera = ttk.Frame(self)
-        frame_camera.grid(row=0, padx=10, pady=(10,0), sticky='NW')
+        # フレーム(上部)
+        frame_upper = ttk.Frame(self)
+        frame_upper.grid(row=0, padx=10, pady=10, sticky='NW')
         # ビデオカメラの映像を表示するキャンバスを用意する
-        self.canvas = Canvas(frame_camera, width=480, height=480)
-        self.canvas.pack()
+        self.canvas_video = Canvas(frame_upper, width=480, height=480)
+        self.canvas_video.pack()
 
-        # フレーム(測定データ)
-        frame_data = ttk.Frame(self)
-        frame_data.grid(row=1, padx=10, pady=(10,0), sticky='NW')
-
-        # サーマルカメラ(AMG8833)
-        self.label_tgt_tmp = ttk.Label(frame_data, text='体温：')
+        # フレーム(下部)
+        frame_lower = ttk.Frame(self)
+        frame_lower.grid(row=1, padx=10, pady=10, sticky='NW')
+        
+        self.label_tgt_tmp = ttk.Label(frame_lower)
         self.label_tgt_tmp.grid(row=0, sticky='NW')
-
-        self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
+        self.label_env_tmp = ttk.Label(frame_lower)
         self.label_env_tmp.grid(row=2, sticky='NW')
-
-        self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
+        self.label_offset_tmp = ttk.Label(frame_lower)
         self.label_offset_tmp.grid(row=5, sticky='NW')
-
-        # 超音波センサ(HC-SR04)
-        self.label_distance = ttk.Label(frame_data, text='対象物までの距離：')
+        self.label_distance = ttk.Label(frame_lower)
         self.label_distance.grid(row=4, sticky='NW')
+
+        self.init_param_widgets()
+
+    ##########################################################################
+    # 計測データ ウィジット 初期化
+    ##########################################################################
+    def init_param_widgets(self):
+        self.label_tgt_tmp.config(text='体温：--.- ℃')
+        self.label_env_tmp.config(text='サーミスタ温度：--.- ℃')
+        self.label_distance.config(text='対象物までの距離：--- cm')
+        self.label_offset_tmp.config(text='オフセット値：--.- ℃')
 
     ##########################################################################
     # デバイスの初期化
@@ -144,11 +149,12 @@ class Application(ttk.Frame):
 
                 else:
                     self.pause_timer = 0
+                    self.init_param_widgets()
 
                 # OpenCV frame -> Pillow Photo
                 self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
                 # Pillow Photo -> Canvas
-                self.canvas.create_image(0, 0, image = self.photo, anchor = 'nw')
+                self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
 
     ##########################################################################
     # 超音波センサ(HC-SR04) 初期化
@@ -192,7 +198,7 @@ class Application(ttk.Frame):
         self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
         # センサの初期化待ち
         time.sleep(.1)
-
+        
     ##########################################################################
     # サーマルカメラ(AMG8833) 制御
     ##########################################################################
@@ -219,7 +225,7 @@ class Application(ttk.Frame):
             self.label_env_tmp.config(text='サーミスタ温度：' + str(thermistor_temp) + ' ℃')
             self.label_offset_tmp.config(text='オフセット値：' + str(offset_temp) + ' ℃')
             
-            print(body_temp_array)
+            # print(body_temp_array)
 
     ##########################################################################
     # 周期処理
