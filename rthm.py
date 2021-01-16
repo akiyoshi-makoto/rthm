@@ -5,7 +5,6 @@ import time
 import RPi.GPIO as GPIO
 import busio
 import board
-from smbus2 import SMBus
 import adafruit_amg88xx
 import cv2
 import numpy as np
@@ -76,9 +75,6 @@ class Application(ttk.Frame):
 
         self.label_env_tmp = ttk.Label(frame_data, text='サーミスタ温度：')
         self.label_env_tmp.grid(row=2, sticky='NW')
-
-        self.label_max_tmp = ttk.Label(frame_data, text='最大温度：')
-        self.label_max_tmp.grid(row=3, sticky='NW')
 
         self.label_offset_tmp = ttk.Label(frame_data, text='オフセット値：')
         self.label_offset_tmp.grid(row=5, sticky='NW')
@@ -203,29 +199,27 @@ class Application(ttk.Frame):
     def ctrl_thermal_camera(self):
         
         if self.face_detection: 
-            # 顔検フラグをクリア
+            # 顔検出フラグをクリア
             self.face_detection = False
             # サーミスタ温度
             thermistor_temp = self.sensor.temperature
-            #
+            # 検出温度
             pixels_array = np.array(self.sensor.pixels)
-            pixels_ave = np.average(pixels_array)
-            pixels_max = np.amax(pixels_array[1:6,2:6])   
-            pixels_min = np.amin(pixels_array)
-            offset_thrm = (-0.6857*thermistor_temp+27.187)  # 補正式
-
+            # サーミスタ温度補正
+            offset_temp = (-0.6857 * thermistor_temp + 25.5)
+            # 距離補正
             if self.distance <= 60.0:
-                offset_thrm = offset_thrm-((60-self.distance)*0.064)    # 補正式(対距離)
-            
-            offset_temp = offset_thrm
-            max_temp = round(pixels_max + offset_temp, 1)   #体温を算出
+                offset_temp = offset_temp - ((60.0 - self.distance) * 0.064)
+            offset_temp = round(offset_temp, 1)
+            # 体温
+            body_temp_array = pixels_array + offset_temp
+            body_temp_max = round(np.amax(body_temp_array), 1)
 
-            self.label_tgt_tmp.config(text='体温：' + str(max_temp) + ' ℃')
+            self.label_tgt_tmp.config(text='体温：' + str(body_temp_max) + ' ℃')
             self.label_env_tmp.config(text='サーミスタ温度：' + str(thermistor_temp) + ' ℃')
-            self.label_max_tmp.config(text='最大温度：' + str(pixels_max) + ' ℃')
             self.label_offset_tmp.config(text='オフセット値：' + str(offset_temp) + ' ℃')
             
-            print(pixels_array)
+            print(body_temp_array)
 
     ##########################################################################
     # 周期処理
