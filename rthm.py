@@ -19,6 +19,12 @@ CYCLE_TIME = 50             # 処理周期[msec]
 I2C_ADR = 0x68              # I2C アドレス
 FACE_DETECTIION_PAUSE = 40  # 顔検出時の一時停止周期
 
+############################################################
+# オプション設定    True:有効 False:無効
+############################################################
+# 超音波センサ(HC-SR04)
+ENABLE_ULTRA_SONIC_SENSOR = True   
+
 class Application(ttk.Frame):
     def __init__(self, master=None):
         ttk.Frame.__init__(self, master)
@@ -74,8 +80,10 @@ class Application(ttk.Frame):
         self.label_env_tmp.grid(row=2, sticky='NW')
         self.label_offset_tmp = ttk.Label(frame_lower)
         self.label_offset_tmp.grid(row=5, sticky='NW')
-        self.label_distance = ttk.Label(frame_lower)
-        self.label_distance.grid(row=4, sticky='NW')
+        
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            self.label_distance = ttk.Label(frame_lower)
+            self.label_distance.grid(row=4, sticky='NW')
 
         self.init_param_widgets()
 
@@ -85,9 +93,11 @@ class Application(ttk.Frame):
     def init_param_widgets(self):
         self.label_tgt_tmp.config(text='体温：--.- ℃')
         self.label_env_tmp.config(text='サーミスタ温度：--.- ℃')
-        self.label_distance.config(text='対象物までの距離：--- cm')
         self.label_offset_tmp.config(text='オフセット値：--.- ℃')
 
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            self.label_distance.config(text='対象物までの距離：--- cm')
+    
     ##########################################################################
     # デバイスの初期化
     ##########################################################################
@@ -95,7 +105,8 @@ class Application(ttk.Frame):
         # ビデオカメラ
         self.init_video_camera()
         # 超音波センサ(HC-SR04)
-        self.init_ultra_sonic_sensor()
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            self.init_ultra_sonic_sensor()
         # サーマルカメラ(AMG8833)
         self.init_thermal_camera()
 
@@ -236,7 +247,8 @@ class Application(ttk.Frame):
             # ビデオカメラ
             self.ctrl_video_camera()
             # 超音波センサ(HC-SR04)
-            self.ctrl_ultra_sonic_sensor()
+            if ENABLE_ULTRA_SONIC_SENSOR:
+                self.ctrl_ultra_sonic_sensor()
             # サーマルカメラ(AMG8833)
             self.ctrl_thermal_camera()
             # 周期処理
@@ -250,7 +262,8 @@ class Application(ttk.Frame):
         self.cycle_proc_exec = False
         # 終了処理
         self.video_camera.release()
-        GPIO.cleanup()
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            GPIO.cleanup()
         # メインウインドウを閉じる
         self.master.destroy()
 
