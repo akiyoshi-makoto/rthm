@@ -16,8 +16,9 @@ import PIL.Image, PIL.ImageTk
 TRIG = 27
 ECHO = 22
 CYCLE_TIME = 50             # 処理周期[msec]
+THERMAL_CYCLE_TIMER = 10    # 温度計測周期[50msec*10=500msec]
 I2C_ADR = 0x68              # I2C アドレス
-FACE_DETECTIION_PAUSE = 40  # 顔検出時の一時停止周期
+FACE_DETECTIION_PAUSE = 60  # 顔検出時の一時停止周期
 TARGET_DISTANCE = 60.0      # 対象までの距離(基準値)
 
 ############################################################
@@ -34,11 +35,18 @@ class Application(ttk.Frame):
         # ウィンドウをスクリーンの中央に配置
         self.setting_window(master)
 
-        self.cycle_proc_exec = True     # 周期処理実行許可フラグ(True:許可 False:禁止)
-        self.pause_timer = 0            # 顔検出時の一時停止タイマ 
-        self.face_detection = False     # 顔検出フラグ(True:検出した False:検出していない)
+        # 周期処理実行許可フラグ(True:許可 False:禁止)
+        self.cycle_proc_exec = True
+        # 顔検出時の一時停止タイマ
+        self.pause_timer = 0
+        # 対象までの距離
         self.distance = TARGET_DISTANCE
-
+        # 体温
+        self.body_temp_max = 0.0
+        # サーミスタ温度
+        self.thermistor_temp = 0.0
+        # オフセット値
+        self.offset_temp = 0.0
         # ウィジットを生成
         self.create_widgets()
         # デバイスの初期化
@@ -78,26 +86,36 @@ class Application(ttk.Frame):
         self.label_tgt_tmp = ttk.Label(frame_lower)
         self.label_tgt_tmp.grid(row=0, sticky='NW')
         self.label_env_tmp = ttk.Label(frame_lower)
-        self.label_env_tmp.grid(row=2, sticky='NW')
+        self.label_env_tmp.grid(row=1, sticky='NW')
         self.label_offset_tmp = ttk.Label(frame_lower)
-        self.label_offset_tmp.grid(row=5, sticky='NW')
-        
+        self.label_offset_tmp.grid(row=2, sticky='NW')
         if ENABLE_ULTRA_SONIC_SENSOR:
             self.label_distance = ttk.Label(frame_lower)
-            self.label_distance.grid(row=4, sticky='NW')
-
+            self.label_distance.grid(row=3, sticky='NW')
+        
         self.init_param_widgets()
 
     ##########################################################################
     # 計測データ ウィジット 初期化
     ##########################################################################
-    def init_param_widgets(self):
+    def init_param_widgets(self):        
         self.label_tgt_tmp.config(text='体温：--.- ℃')
         self.label_env_tmp.config(text='サーミスタ温度：--.- ℃')
         self.label_offset_tmp.config(text='オフセット値：--.- ℃')
 
         if ENABLE_ULTRA_SONIC_SENSOR:
             self.label_distance.config(text='対象物までの距離：--- cm')
+
+    ##########################################################################
+    # 計測データ ウィジット 表示更新
+    ##########################################################################
+    def update_param_widgets(self):
+        self.label_tgt_tmp.config(text='体温：' + str(self.body_temp_max) + ' ℃')
+        self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
+        self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
+
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            self.label_distance.config(text='対象物までの距離：' + str(round(self.distance)) + ' cm' )
     
     ##########################################################################
     # デバイスの初期化
@@ -126,47 +144,42 @@ class Application(ttk.Frame):
     # ビデオカメラ 制御
     ##########################################################################
     def ctrl_video_camera(self):
-        if self.video_camera.isOpened():
+        # ビデオカメラの停止画を取得
+        ret, frame = self.video_camera.read()
+        
+        if self.pause_timer > 0:
+            self.pause_timer -= 1
+        else:
+            # 左右反転
+            frame_mirror = cv2.flip(frame, 1)
+            # OpenCV(BGR) -> Pillow(RGB)変換
+            frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
+            # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
+            frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
+            # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
+            facerect = self.face_cascade.detectMultiScale(frame_gray,
+                                                          scaleFactor=1.2,
+                                                          minNeighbors=2,
+                                                          minSize=(320, 320))
+            # 顔が検出された場合
+            if len(facerect) > 0:
+                # 一時停止してその間にサーマルカメラ制御を実行する
+                self.pause_timer = FACE_DETECTIION_PAUSE
+                # 検出した場所すべてに緑色で枠を描画する
+                for rect in facerect:
+                    cv2.rectangle(frame_color,
+                                  tuple(rect[0:2]),
+                                  tuple(rect[0:2]+rect[2:4]),
+                                  (0, 255, 0),
+                                  thickness=3)
 
-            # ビデオカメラの停止画を取得
-            ret, frame = self.video_camera.read()
-
-            if self.pause_timer > 0:
-                self.pause_timer -= 1
             else:
-                # 左右反転
-                frame_mirror = cv2.flip(frame, 1)
-                # OpenCV(BGR) -> Pillow(RGB)変換
-                frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
-                # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
-                frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
-                # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
-                facerect = self.face_cascade.detectMultiScale(frame_gray,
-                                                              scaleFactor=1.2,
-                                                              minNeighbors=2,
-                                                              minSize=(320, 320))
-                # 顔が検出された場合
-                if len(facerect) > 0:
-                    # 一時停止してその間にサーマルカメラ制御を実行する
-                    self.pause_timer = FACE_DETECTIION_PAUSE
-                    # 顔検出フラグセット
-                    self.face_detection = True
-                    # 検出した場所すべてに緑色で枠を描画する
-                    for rect in facerect:
-                        cv2.rectangle(frame_color,
-                                      tuple(rect[0:2]),
-                                      tuple(rect[0:2]+rect[2:4]),
-                                      (0, 255, 0),
-                                      thickness=3)
+                self.pause_timer = 0
 
-                else:
-                    self.pause_timer = 0
-                    self.init_param_widgets()
-
-                # OpenCV frame -> Pillow Photo
-                self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
-                # Pillow Photo -> Canvas
-                self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
+            # OpenCV frame -> Pillow Photo
+            self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
+            # Pillow Photo -> Canvas
+            self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
 
     ##########################################################################
     # 超音波センサ(HC-SR04) 初期化
@@ -182,23 +195,20 @@ class Application(ttk.Frame):
     # 超音波センサ(HC-SR04) 制御
     ##########################################################################
     def ctrl_ultra_sonic_sensor(self):
-
-        if self.face_detection: 
-            # Trig端子を10us以上High
-            GPIO.output(TRIG, GPIO.HIGH)
-            time.sleep(0.00001)
-            GPIO.output(TRIG, GPIO.LOW)
-            # EchoパルスがHighになる時間
-            while GPIO.input(ECHO) == 0:
-                echo_on = time.time()
-            # EchoパルスがLowになる時間
-            while GPIO.input(ECHO) == 1:
-                echo_off = time.time()
-            # Echoパルスのパルス幅(us)
-            echo_pulse_width = (echo_off - echo_on) * 1000000
-            # 距離を算出:Distance in cm = echo pulse width in uS/58
-            self.distance = echo_pulse_width / 58
-            self.label_distance.config(text='対象物までの距離：' + str(round(self.distance)) + ' cm' )
+        # Trig端子を10us以上High
+        GPIO.output(TRIG, GPIO.HIGH)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, GPIO.LOW)
+        # EchoパルスがHighになる時間
+        while GPIO.input(ECHO) == 0:
+            echo_on = time.time()
+        # EchoパルスがLowになる時間
+        while GPIO.input(ECHO) == 1:
+            echo_off = time.time()
+        # Echoパルスのパルス幅(us)
+        echo_pulse_width = (echo_off - echo_on) * 1000000
+        # 距離を算出:Distance in cm = echo pulse width in uS/58
+        self.distance = echo_pulse_width / 58
 
     ##########################################################################
     # サーマルカメラ(AMG8833) 初期化
@@ -215,29 +225,23 @@ class Application(ttk.Frame):
     # サーマルカメラ(AMG8833) 制御
     ##########################################################################
     def ctrl_thermal_camera(self):
-        
-        if self.face_detection: 
-            # 顔検出フラグをクリア
-            self.face_detection = False
-            # サーミスタ温度
-            thermistor_temp = self.sensor.temperature
-            # 検出温度
-            pixels_array = np.array(self.sensor.pixels)
-            # サーミスタ温度補正
-            offset_temp = (-0.6857 * thermistor_temp + 25.5)
-            # 距離補正
-            if self.distance <= TARGET_DISTANCE:
-                offset_temp = offset_temp - ((TARGET_DISTANCE - self.distance) * 0.064)
-            offset_temp = round(offset_temp, 1)
-            # 体温
-            body_temp_array = pixels_array + offset_temp
-            body_temp_max = round(np.amax(body_temp_array), 1)
+        # サーミスタ温度
+        self.thermistor_temp = round(self.sensor.temperature, 1)
+        # 検出温度
+        pixels_array = np.array(self.sensor.pixels)
+        # サーミスタ温度補正
+        corr_thrm  = (-0.6857 * self.thermistor_temp + 25.5)
+        # 距離補正
+        if self.distance < TARGET_DISTANCE:
+            corr_distance = corr_thrm - ((TARGET_DISTANCE - self.distance) * 0.064)
+        else:
+            corr_distance = corr_thrm
+        self.offset_temp = round(corr_distance, 1)
+        # 体温
+        body_temp_array = pixels_array + self.offset_temp
+        self.body_temp_max = round(np.amax(body_temp_array), 1)
 
-            self.label_tgt_tmp.config(text='体温：' + str(body_temp_max) + ' ℃')
-            self.label_env_tmp.config(text='サーミスタ温度：' + str(thermistor_temp) + ' ℃')
-            self.label_offset_tmp.config(text='オフセット値：' + str(offset_temp) + ' ℃')
-            
-            # print(body_temp_array)
+        # print(body_temp_array)
 
     ##########################################################################
     # 周期処理
@@ -246,12 +250,29 @@ class Application(ttk.Frame):
         # 周期処理実行許可
         if self.cycle_proc_exec:
             # ビデオカメラ
-            self.ctrl_video_camera()
-            # 超音波センサ(HC-SR04)
-            if ENABLE_ULTRA_SONIC_SENSOR:
-                self.ctrl_ultra_sonic_sensor()
-            # サーマルカメラ(AMG8833)
-            self.ctrl_thermal_camera()
+            if self.video_camera.isOpened():
+                self.ctrl_video_camera()
+            else:
+                self.pause_timer = 0
+
+            if self.pause_timer > 0:
+                if self.thermal_cycle_timer == 0:
+                    # 超音波センサ(HC-SR04)
+                    if ENABLE_ULTRA_SONIC_SENSOR:
+                        self.ctrl_ultra_sonic_sensor()
+                    # サーマルカメラ(AMG8833)
+                    self.ctrl_thermal_camera()
+                    # 計測データ 表示更新
+                    self.update_param_widgets()
+                    # 温度計測周期タイマセット
+                    self.thermal_cycle_timer = THERMAL_CYCLE_TIMER
+                else:
+                    self.thermal_cycle_timer -= 1
+            else:
+                # 計測データ ウィジット 初期化
+                self.init_param_widgets()
+                self.thermal_cycle_timer = 0
+
             # 周期処理
             self.after(CYCLE_TIME, self.cycle_proc)
 
