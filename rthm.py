@@ -18,6 +18,7 @@ ECHO = 22
 CYCLE_TIME = 50             # 処理周期[msec]
 I2C_ADR = 0x68              # I2C アドレス
 FACE_DETECTIION_PAUSE = 40  # 顔検出時の一時停止周期
+TARGET_DISTANCE = 60.0      # 対象までの距離(基準値)
 
 ############################################################
 # オプション設定    True:有効 False:無効
@@ -36,7 +37,7 @@ class Application(ttk.Frame):
         self.cycle_proc_exec = True     # 周期処理実行許可フラグ(True:許可 False:禁止)
         self.pause_timer = 0            # 顔検出時の一時停止タイマ 
         self.face_detection = False     # 顔検出フラグ(True:検出した False:検出していない)
-        self.distance = 60.0
+        self.distance = TARGET_DISTANCE
 
         # ウィジットを生成
         self.create_widgets()
@@ -225,8 +226,8 @@ class Application(ttk.Frame):
             # サーミスタ温度補正
             offset_temp = (-0.6857 * thermistor_temp + 25.5)
             # 距離補正
-            if self.distance <= 60.0:
-                offset_temp = offset_temp - ((60.0 - self.distance) * 0.064)
+            if self.distance <= TARGET_DISTANCE:
+                offset_temp = offset_temp - ((TARGET_DISTANCE - self.distance) * 0.064)
             offset_temp = round(offset_temp, 1)
             # 体温
             body_temp_array = pixels_array + offset_temp
