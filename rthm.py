@@ -15,17 +15,17 @@ import PIL.Image, PIL.ImageTk
 ##############################################################################
 TRIG = 27
 ECHO = 22
-CYCLE_TIME = 50             # 処理周期[msec]
-THERMAL_CYCLE_TIMER = 10    # 温度計測周期[50msec*10=500msec]
 I2C_ADR = 0x68              # I2C アドレス
-FACE_DETECTIION_PAUSE = 60  # 顔検出時の一時停止周期
+CYCLE_TIME = 30             # 処理周期[msec]
+THERMAL_CYCLE_TIMER = 10    # 温度計測周期[30msec*10=300msec]
+FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000msec]
 TARGET_DISTANCE = 60.0      # 対象までの距離(基準値)
 
 ############################################################
 # オプション設定    True:有効 False:無効
 ############################################################
 # 超音波センサ(HC-SR04)
-ENABLE_ULTRA_SONIC_SENSOR = True   
+ENABLE_ULTRA_SONIC_SENSOR = False   
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
@@ -137,6 +137,8 @@ class Application(ttk.Frame):
         self.video_camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
         self.video_camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
+        # print(self.video_camera.get(cv2.CAP_PROP_FPS))
+
         # 顔検出のための学習元データを読み込む
         self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
 
@@ -144,42 +146,39 @@ class Application(ttk.Frame):
     # ビデオカメラ 制御
     ##########################################################################
     def ctrl_video_camera(self):
+    
         # ビデオカメラの停止画を取得
         ret, frame = self.video_camera.read()
-        
-        if self.pause_timer > 0:
-            self.pause_timer -= 1
+        # 左右反転
+        frame_mirror = cv2.flip(frame, 1)
+        # OpenCV(BGR) -> Pillow(RGB)変換
+        frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
+        # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
+        frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
+        # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
+        facerect = self.face_cascade.detectMultiScale(frame_gray,
+                                                        scaleFactor=1.2,
+                                                        minNeighbors=2,
+                                                        minSize=(320, 320))
+        # 顔が検出された場合
+        if len(facerect) > 0:
+            # 一時停止してその間にサーマルカメラ制御を実行する
+            self.pause_timer = FACE_DETECTIION_PAUSE
+            # 検出した場所すべてに緑色で枠を描画する
+            for rect in facerect:
+                cv2.rectangle(frame_color,
+                                tuple(rect[0:2]),
+                                tuple(rect[0:2]+rect[2:4]),
+                                (0, 255, 0),
+                                thickness=3)
+
         else:
-            # 左右反転
-            frame_mirror = cv2.flip(frame, 1)
-            # OpenCV(BGR) -> Pillow(RGB)変換
-            frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
-            # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
-            frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
-            # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
-            facerect = self.face_cascade.detectMultiScale(frame_gray,
-                                                          scaleFactor=1.2,
-                                                          minNeighbors=2,
-                                                          minSize=(320, 320))
-            # 顔が検出された場合
-            if len(facerect) > 0:
-                # 一時停止してその間にサーマルカメラ制御を実行する
-                self.pause_timer = FACE_DETECTIION_PAUSE
-                # 検出した場所すべてに緑色で枠を描画する
-                for rect in facerect:
-                    cv2.rectangle(frame_color,
-                                  tuple(rect[0:2]),
-                                  tuple(rect[0:2]+rect[2:4]),
-                                  (0, 255, 0),
-                                  thickness=3)
+            self.pause_timer = 0
 
-            else:
-                self.pause_timer = 0
-
-            # OpenCV frame -> Pillow Photo
-            self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
-            # Pillow Photo -> Canvas
-            self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
+        # OpenCV frame -> Pillow Photo
+        self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
+        # Pillow Photo -> Canvas
+        self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
 
     ##########################################################################
     # 超音波センサ(HC-SR04) 初期化
@@ -241,7 +240,7 @@ class Application(ttk.Frame):
         body_temp_array = pixels_array + self.offset_temp
         self.body_temp_max = round(np.amax(body_temp_array), 1)
 
-        # print(body_temp_array)
+        print(body_temp_array)
 
     ##########################################################################
     # 周期処理
@@ -249,13 +248,18 @@ class Application(ttk.Frame):
     def cycle_proc(self):
         # 周期処理実行許可
         if self.cycle_proc_exec:
-            # ビデオカメラ
-            if self.video_camera.isOpened():
-                self.ctrl_video_camera()
-            else:
-                self.pause_timer = 0
+            if self.pause_timer == 0:
+                # ビデオカメラ
+                if self.video_camera.isOpened():
+                    self.ctrl_video_camera()
 
-            if self.pause_timer > 0:
+                # 計測データ ウィジット 初期化
+                self.init_param_widgets()
+                self.thermal_cycle_timer = 0
+
+            elif self.pause_timer > 0:
+                self.pause_timer -= 1
+
                 if self.thermal_cycle_timer == 0:
                     # 超音波センサ(HC-SR04)
                     if ENABLE_ULTRA_SONIC_SENSOR:
@@ -266,12 +270,12 @@ class Application(ttk.Frame):
                     self.update_param_widgets()
                     # 温度計測周期タイマセット
                     self.thermal_cycle_timer = THERMAL_CYCLE_TIMER
-                else:
+                elif self.thermal_cycle_timer > 0:
                     self.thermal_cycle_timer -= 1
+                else:
+                    self.thermal_cycle_timer = 0
             else:
-                # 計測データ ウィジット 初期化
-                self.init_param_widgets()
-                self.thermal_cycle_timer = 0
+                self.pause_timer = 0
 
             # 周期処理
             self.after(CYCLE_TIME, self.cycle_proc)
