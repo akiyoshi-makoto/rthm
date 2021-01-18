@@ -16,9 +16,9 @@ import PIL.Image, PIL.ImageTk
 TRIG = 27
 ECHO = 22
 I2C_ADR = 0x68              # I2C アドレス
-CYCLE_TIME = 30             # 処理周期[msec]
-THERMAL_CYCLE_TIMER = 10    # 温度計測周期[30msec*10=300msec]
+PROC_CYCLE = 30             # 処理周期[msec]
 FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000msec]
+THERMAL_CYCLE = 20          # 温度計測周期[30msec*20=600msec]
 TARGET_DISTANCE = 60.0      # 対象までの距離(基準値)
 
 ############################################################
@@ -240,7 +240,7 @@ class Application(ttk.Frame):
         body_temp_array = pixels_array + self.offset_temp
         self.body_temp_max = round(np.amax(body_temp_array), 1)
 
-        print(body_temp_array)
+        # print(body_temp_array)
 
     ##########################################################################
     # 周期処理
@@ -269,7 +269,7 @@ class Application(ttk.Frame):
                     # 計測データ 表示更新
                     self.update_param_widgets()
                     # 温度計測周期タイマセット
-                    self.thermal_cycle_timer = THERMAL_CYCLE_TIMER
+                    self.thermal_cycle_timer = THERMAL_CYCLE
                 elif self.thermal_cycle_timer > 0:
                     self.thermal_cycle_timer -= 1
                 else:
@@ -278,7 +278,7 @@ class Application(ttk.Frame):
                 self.pause_timer = 0
 
             # 周期処理
-            self.after(CYCLE_TIME, self.cycle_proc)
+            self.after(PROC_CYCLE, self.cycle_proc)
 
     ##########################################################################
     # 閉じるボタンが押下された場合の処理
