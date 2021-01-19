@@ -9,6 +9,7 @@ import adafruit_amg88xx
 import cv2
 import numpy as np
 import PIL.Image, PIL.ImageTk
+import matplotlib.pyplot as plt
 
 ##############################################################################
 # 定数
@@ -18,14 +19,15 @@ ECHO = 22
 I2C_ADR = 0x68              # I2C アドレス
 PROC_CYCLE = 30             # 処理周期[msec]
 FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000msec]
-THERMAL_CYCLE = 20          # 温度計測周期[30msec*20=600msec]
 TARGET_DISTANCE = 60.0      # 対象までの距離(基準値)
 
 ############################################################
 # オプション設定    True:有効 False:無効
 ############################################################
 # 超音波センサ(HC-SR04)
-ENABLE_ULTRA_SONIC_SENSOR = False   
+ENABLE_ULTRA_SONIC_SENSOR = False  
+# サーモグラフィ
+ENABLE_THERMO_GRAPHY = False
 
 class Application(ttk.Frame):
     def __init__(self, master=None):
@@ -39,6 +41,8 @@ class Application(ttk.Frame):
         self.cycle_proc_exec = True
         # 顔検出時の一時停止タイマ
         self.pause_timer = 0
+        # 一時停止中の経過時間
+        self.the_world_timer = 0
         # 対象までの距離
         self.distance = TARGET_DISTANCE
         # 体温
@@ -95,6 +99,9 @@ class Application(ttk.Frame):
         
         self.init_param_widgets()
 
+        if ENABLE_THERMO_GRAPHY:
+            self.init_thermo_graphy()
+
     ##########################################################################
     # 計測データ ウィジット 初期化
     ##########################################################################
@@ -126,7 +133,7 @@ class Application(ttk.Frame):
         # 超音波センサ(HC-SR04)
         if ENABLE_ULTRA_SONIC_SENSOR:
             self.init_ultra_sonic_sensor()
-        # サーマルカメラ(AMG8833)
+        # サーマルセンサ(AMG8833)
         self.init_thermal_camera()
 
     ##########################################################################
@@ -162,7 +169,7 @@ class Application(ttk.Frame):
                                                         minSize=(320, 320))
         # 顔が検出された場合
         if len(facerect) > 0:
-            # 一時停止してその間にサーマルカメラ制御を実行する
+            # 一時停止してその間にサーマルセンサ制御を実行する
             self.pause_timer = FACE_DETECTIION_PAUSE
             # 検出した場所すべてに緑色で枠を描画する
             for rect in facerect:
@@ -210,7 +217,7 @@ class Application(ttk.Frame):
         self.distance = echo_pulse_width / 58
 
     ##########################################################################
-    # サーマルカメラ(AMG8833) 初期化
+    # サーマルセンサ(AMG8833) 初期化
     ##########################################################################
     def init_thermal_camera(self):   
         # I2Cバスの初期化
@@ -219,13 +226,18 @@ class Application(ttk.Frame):
         self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
         # センサの初期化待ち
         time.sleep(.1)
-        
+
     ##########################################################################
-    # サーマルカメラ(AMG8833) 制御
+    # サーマルセンサ(AMG8833) サーミスタ制御
+    ##########################################################################
+    def ctrl_thermal_thermistor(self):
+        # サーミスタ温度
+        self.thermistor_temp = round(self.sensor.temperature, 1)     
+
+    ##########################################################################
+    # サーマルセンサ(AMG8833) カメラ制御
     ##########################################################################
     def ctrl_thermal_camera(self):
-        # サーミスタ温度
-        self.thermistor_temp = round(self.sensor.temperature, 1)
         # 検出温度
         pixels_array = np.array(self.sensor.pixels)
         # サーミスタ温度補正
@@ -237,10 +249,38 @@ class Application(ttk.Frame):
             corr_distance = corr_thrm
         self.offset_temp = round(corr_distance, 1)
         # 体温
-        body_temp_array = pixels_array + self.offset_temp
-        self.body_temp_max = round(np.amax(body_temp_array), 1)
+        self.body_temp_array = pixels_array + self.offset_temp
+        self.body_temp_max = round(np.amax(self.body_temp_array), 1)
 
-        # print(body_temp_array)
+        # print(self.body_temp_array)
+
+    ##########################################################################
+    # サーモグラフィ 初期化
+    ##########################################################################
+    def init_thermo_graphy(self):
+        plt.subplots(figsize=(4, 4))
+  
+    ##########################################################################
+    # サーモグラフィ 終了処理
+    ##########################################################################
+    def end_thermo_graphy(self):
+        plt.close('all')
+
+    ##########################################################################
+    # サーモグラフィ 制御
+    ##########################################################################
+    def ctrl_thermo_graphy(self):
+        plt.imshow(self.body_temp_array,
+                   cmap="jet",
+                   interpolation="bicubic",
+                   vmin=20,
+                   vmax=40,
+                   origin='lower')
+        plt.colorbar()
+        plt.show()
+        plt.draw()
+        plt.pause(0.01)
+        plt.clf()
 
     ##########################################################################
     # 周期処理
@@ -255,30 +295,53 @@ class Application(ttk.Frame):
 
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
-                self.thermal_cycle_timer = 0
+                self.the_world_timer = 0
 
             elif self.pause_timer > 0:
                 self.pause_timer -= 1
 
-                if self.thermal_cycle_timer == 0:
+                # ザ・ワールド !!!!
+                if self.the_world_timer == 0:
+                    # サーマルセンサ(AMG8833) サーミスタ制御
+                    self.ctrl_thermal_thermistor()
+                elif self.the_world_timer == 1:
                     # 超音波センサ(HC-SR04)
                     if ENABLE_ULTRA_SONIC_SENSOR:
                         self.ctrl_ultra_sonic_sensor()
-                    # サーマルカメラ(AMG8833)
+                elif self.the_world_timer == 2:    
+                    # サーマルセンサ(AMG8833) カメラ制御
                     self.ctrl_thermal_camera()
                     # 計測データ 表示更新
                     self.update_param_widgets()
-                    # 温度計測周期タイマセット
-                    self.thermal_cycle_timer = THERMAL_CYCLE
-                elif self.thermal_cycle_timer > 0:
-                    self.thermal_cycle_timer -= 1
+                elif self.the_world_timer == 3:
+                    # サーモグラフィ
+                    if ENABLE_THERMO_GRAPHY:
+                        self.ctrl_thermo_graphy()
                 else:
-                    self.thermal_cycle_timer = 0
+                    pass
+
+                self.the_world_timer += 1
+
             else:
                 self.pause_timer = 0
+                self.the_world_timer = 0
+        else:
+            self.end_application()
 
-            # 周期処理
-            self.after(PROC_CYCLE, self.cycle_proc)
+        # 周期処理
+        self.after(PROC_CYCLE, self.cycle_proc)
+
+    ##########################################################################
+    # アプリケーション終了処理
+    ##########################################################################
+    def end_application(self):
+        self.video_camera.release()
+        if ENABLE_THERMO_GRAPHY:
+            self.end_thermo_graphy()
+        if ENABLE_ULTRA_SONIC_SENSOR:
+            GPIO.cleanup()
+        # メインウインドウを閉じる
+        self.master.destroy()
 
     ##########################################################################
     # 閉じるボタンが押下された場合の処理
@@ -286,12 +349,6 @@ class Application(ttk.Frame):
     def on_close_button(self):
         # 周期処理実行禁止
         self.cycle_proc_exec = False
-        # 終了処理
-        self.video_camera.release()
-        if ENABLE_ULTRA_SONIC_SENSOR:
-            GPIO.cleanup()
-        # メインウインドウを閉じる
-        self.master.destroy()
 
 if __name__ == '__main__':
     root = Tk()
