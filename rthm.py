@@ -33,12 +33,15 @@ class Application(ttk.Frame):
         self.pause_timer = 0
         # 一時停止中の経過時間
         self.the_world_timer = 0
+        # 検出温度(最大値)
+        self.pixels_max = 0.0
         # 体温
         self.body_temp = 0.0
         # サーミスタ温度
         self.thermistor_temp = 0.0
         # オフセット値
         self.offset_temp = 0.0
+
         # ウィジットを生成
         self.create_widgets()
         # デバイスの初期化
@@ -75,29 +78,40 @@ class Application(ttk.Frame):
         frame_lower = ttk.Frame(self)
         frame_lower.grid(row=1, padx=10, pady=10, sticky='NW')
         
-        self.label_tgt_tmp = ttk.Label(frame_lower)
-        self.label_tgt_tmp.grid(row=0, sticky='NW')
+        self.label_sns_tmp = ttk.Label(frame_lower)
+        self.label_sns_tmp.grid(row=0, sticky='NW')
         self.label_env_tmp = ttk.Label(frame_lower)
         self.label_env_tmp.grid(row=1, sticky='NW')
         self.label_offset_tmp = ttk.Label(frame_lower)
         self.label_offset_tmp.grid(row=2, sticky='NW')
+        self.label_body_tmp = ttk.Label(frame_lower)
+        self.label_body_tmp.grid(row=3, sticky='NW')
         self.init_param_widgets()
+
+        print('検出温度(最大値)：　サーミスタ温度：　オフセット値：　体温：')
 
     ##########################################################################
     # 計測データ ウィジット 初期化
     ##########################################################################
     def init_param_widgets(self):        
-        self.label_tgt_tmp.config(text='体温：--.- ℃')
+        self.label_sns_tmp.config(text='検出温度(最大値)：--.- ℃')
         self.label_env_tmp.config(text='サーミスタ温度：--.- ℃')
         self.label_offset_tmp.config(text='オフセット値：--.- ℃')
-
+        self.label_body_tmp.config(text='体温：--.- ℃')
+    
     ##########################################################################
     # 計測データ ウィジット 表示更新
     ##########################################################################
     def update_param_widgets(self):
-        self.label_tgt_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
+        self.label_sns_tmp.config(text='検出温度(最大値)：' + str(self.pixels_max) + ' ℃')
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
+        self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
+        
+        print(str(self.pixels_max) + '  ' +
+              str(self.thermistor_temp) + '  ' +
+              str(self.offset_temp) +  '  ' +
+              str(self.body_temp))
 
     ##########################################################################
     # デバイスの初期化
@@ -187,11 +201,12 @@ class Application(ttk.Frame):
     def ctrl_thermal_temperature(self):
         # 検出温度
         pixels_array = np.array(self.sensor.pixels)
+        # 検出温度(最大値)
+        self.pixels_max = np.amax(pixels_array)
         # サーミスタ温度補正
-        self.offset_temp   = round((-0.6857 * self.thermistor_temp + 25.5), 1)
+        self.offset_temp = round((-0.6857 * self.thermistor_temp + 28), 1)
         # 体温
-        self.body_temp_array = pixels_array + self.offset_temp
-        self.body_temp = round(np.amax(self.body_temp_array), 1)
+        self.body_temp = round((self.pixels_max + self.offset_temp), 1)
 
         # print(self.body_temp_array)
 
@@ -207,7 +222,6 @@ class Application(ttk.Frame):
                     self.read_video_frame()
                     # 顔認識処理
                     self.detect_face()
-
                     # 計測データ ウィジット 初期化
                     self.init_param_widgets()
                     self.the_world_timer = 0
