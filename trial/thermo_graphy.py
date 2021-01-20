@@ -26,14 +26,13 @@ try:
         # 8x8センサアレイ内の最大温度を取得
         pixels_array = np.array(sensor.pixels)
         # サーミスタ温度補正
-        corr_thrm  = (-0.6857 * thermistor_temp + 25.5)
-        offset_temp = round(corr_thrm, 1)
+        offset_temp = round((0.8424 * thermistor_temp - 3.2523), 2)
         # 体温
         body_temp_array = pixels_array + offset_temp
         body_temp_max = round(np.amax(body_temp_array), 1)
  
         plt.subplot(1,2,1)
-        plt.imshow(body_temp_array, cmap="inferno", interpolation="bicubic",vmin=25,vmax=40)
+        plt.imshow(body_temp_array, cmap="inferno", interpolation="bicubic",vmin=30,vmax=40)
         plt.colorbar()
         plt.show
         plt.draw()
