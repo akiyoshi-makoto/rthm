@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from tkinter import *
 from tkinter import ttk
+from tkinter import messagebox
 import time
 import busio
 import board
@@ -27,8 +28,10 @@ class Application(ttk.Frame):
         self.pause_timer = 0
         # 一時停止中の経過時間
         self.the_world_timer = 0
-        # 検出温度(最大値)
-        self.pixels_max = 0.0
+        # 検出温度
+        self.sensor_temp = [0.0, 0.0]
+        # 検出温度(平均値)
+        self.sensor_temp_ave = 0.0
         # 体温
         self.body_temp = 0.0
         # サーミスタ温度
@@ -44,11 +47,11 @@ class Application(ttk.Frame):
         # デバイスの初期化
         self.init_device()
         
-        if self.video_camera.isOpened():
+        if self.camera.isOpened():
             # 周期処理
             self.cycle_proc()
         else:
-            print('カメラ認識エラー')
+            messagebox.showerror('カメラ認識エラー', 'カメラの接続を確認してください')
 
     ##########################################################################
     # ウィンドウをスクリーンの中央に配置
@@ -71,31 +74,35 @@ class Application(ttk.Frame):
         # フレーム(上部)
         frame_upper = ttk.Frame(self)
         frame_upper.grid(row=0, padx=10, pady=10, sticky='NW')
-        # ビデオカメラの映像を表示するキャンバスを用意する
-        self.canvas_video = Canvas(frame_upper, width=480, height=480)
-        self.canvas_video.pack()
+        # カメラの映像を表示するキャンバスを用意する
+        self.canvas_camera = Canvas(frame_upper, width=480, height=480)
+        self.canvas_camera.pack()
 
         # フレーム(下部)
         frame_lower = ttk.Frame(self)
         frame_lower.grid(row=1, padx=10, pady=10, sticky='NW')
         
-        self.label_sns_tmp = ttk.Label(frame_lower)
-        self.label_sns_tmp.grid(row=0, sticky='NW')
+        self.label_sns_tmp1 = ttk.Label(frame_lower)
+        self.label_sns_tmp1.grid(row=0, sticky='NW')
+        self.label_sns_tmp2 = ttk.Label(frame_lower)
+        self.label_sns_tmp2.grid(row=1, sticky='NW')
+        self.label_sns_tmp_ave = ttk.Label(frame_lower)
+        self.label_sns_tmp_ave.grid(row=2, sticky='NW')
         self.label_env_tmp = ttk.Label(frame_lower)
-        self.label_env_tmp.grid(row=1, sticky='NW')
+        self.label_env_tmp.grid(row=3, sticky='NW')
         self.label_offset_tmp = ttk.Label(frame_lower)
-        self.label_offset_tmp.grid(row=2, sticky='NW')
+        self.label_offset_tmp.grid(row=4, sticky='NW')
         self.label_body_tmp = ttk.Label(frame_lower)
-        self.label_body_tmp.grid(row=3, sticky='NW')
+        self.label_body_tmp.grid(row=5, sticky='NW')
         self.init_param_widgets()
-
-        print('検出温度(最大値)：　サーミスタ温度：　オフセット値：　体温：')
 
     ##########################################################################
     # 計測データ ウィジット 初期化
     ##########################################################################
     def init_param_widgets(self):        
-        self.label_sns_tmp.config(text='検出温度(最大値)：--.- ℃')
+        self.label_sns_tmp1.config(text='検出温度(1回目)：--.- ℃')
+        self.label_sns_tmp2.config(text='検出温度(2回目)：--.- ℃')
+        self.label_sns_tmp_ave.config(text='検出温度(平均値)：--.- ℃')
         self.label_env_tmp.config(text='サーミスタ温度：--.- ℃')
         self.label_offset_tmp.config(text='オフセット値：--.- ℃')
         self.label_body_tmp.config(text='体温：--.- ℃')
@@ -104,12 +111,16 @@ class Application(ttk.Frame):
     # 計測データ ウィジット 表示更新
     ##########################################################################
     def update_param_widgets(self):
-        self.label_sns_tmp.config(text='検出温度(最大値)：' + str(self.pixels_max) + ' ℃')
+        self.label_sns_tmp1.config(text='検出温度(1回目)：' + str(self.sensor_temp[0]) + ' ℃')
+        self.label_sns_tmp2.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
+        self.label_sns_tmp_ave.config(text='検出温度(平均値)：' + str(self.sensor_temp_ave) + ' ℃')
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
         self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
         
-        print(str(self.pixels_max) + '  ' +
+        print(str(self.sensor_temp[0]) + '  ' +
+              str(self.sensor_temp[1]) + '  ' +
+              str(self.sensor_temp_ave) + '  ' +
               str(self.thermistor_temp) + '  ' +
               str(self.offset_temp) +  '  ' +
               str(self.body_temp))
@@ -118,20 +129,20 @@ class Application(ttk.Frame):
     # デバイスの初期化
     ##########################################################################
     def init_device(self):   
-        # ビデオカメラ
-        self.init_video_camera()
+        # カメラ
+        self.init_camera()
         # サーマルセンサ(AMG8833)
         self.init_thermal_sensor()
 
     ##########################################################################
-    # ビデオカメラ　初期化
+    # カメラ　初期化
     ##########################################################################
-    def init_video_camera(self):   
-        self.video_camera = cv2.VideoCapture(0)
-        self.video_camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
-        self.video_camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    def init_camera(self):   
+        self.camera = cv2.VideoCapture(0)
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-        # print(self.video_camera.get(cv2.CAP_PROP_FPS))
+        # print(self.camera.get(cv2.CAP_PROP_FPS))
 
         # 顔検出のための学習元データを読み込む
         self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
@@ -152,36 +163,52 @@ class Application(ttk.Frame):
     ##########################################################################
     def cycle_proc(self):
         if self.pause_timer == 0:
-            # 停止画取得処理
-            self.read_video_frame()
-            # 顔認識処理
-            self.detect_face()
             # 計測データ ウィジット 初期化
             self.init_param_widgets()
+            # 停止画取得
+            self.camera_get_frame()
+            # 顔認識処理
+            is_detect = self.camera_detect_face()
+
+            if is_detect:
+                # 一時停止している間に体温を測定する
+                self.pause_timer = FACE_DETECTIION_PAUSE
+            else:
+                self.pause_timer = 0
+            
             self.the_world_timer = 0
 
         elif self.pause_timer < 10:
-            self.pause_timer -= 1
-            # 停止画取得処理
+            # 停止画取得
             # バッファに停止画が残っている場合を想定して顔認識をせずに停止画取得のみ行う
-            self.read_video_frame()
+            self.camera_get_frame()
+
+            self.pause_timer -= 1
+            self.the_world_timer = 0
 
         elif self.pause_timer >= 10:
-            self.pause_timer -= 1
-
             # ザ・ワールド !!!!
             if self.the_world_timer == 0:
-                # サーマルセンサ(AMG8833) サーミスタ制御
-                self.ctrl_thermal_thermistor()
+                # サーマルセンサ(AMG8833) 赤外線アレイセンサ 温度取得(1回目)
+                self.thermal_get_temperature(0)
             elif self.the_world_timer == 1:
-                # サーマルセンサ(AMG8833) 赤外線アレイセンサ制御
-                self.ctrl_thermal_temperature()
-            elif self.the_world_timer == 2:    
+                # サーマルセンサ(AMG8833) サーミスタ 温度取得
+                self.thermal_get_thermistor()
+            elif self.the_world_timer < 10:
+                pass
+            elif self.the_world_timer == 10:
+                # サーマルセンサ(AMG8833) 赤外線アレイセンサ 温度取得(2回目)
+                self.thermal_get_temperature(1)
+            elif self.the_world_timer == 11:
+                # サーマルセンサ(AMG8833) 体温の算出
+                self.thermal_make_body_temp()
+            elif self.the_world_timer == 12:
                 # 計測データ 表示更新
                 self.update_param_widgets()
             else:
                 pass
 
+            self.pause_timer -= 1
             self.the_world_timer += 1
 
         else:
@@ -193,16 +220,16 @@ class Application(ttk.Frame):
         self.after(PROC_CYCLE, self.cycle_proc)
 
     ##########################################################################
-    # 停止画取得処理
+    # 停止画取得
     ##########################################################################
-    def read_video_frame(self):
-        # ビデオカメラの停止画を取得
-        ret, self.frame = self.video_camera.read()
+    def camera_get_frame(self):
+        # 停止画を取得
+        ret, self.frame = self.camera.read()
     
     ##########################################################################
     # 顔認識処理
     ##########################################################################
-    def detect_face(self):
+    def camera_detect_face(self):
         # 左右反転
         frame_mirror = cv2.flip(self.frame, 1)
         # OpenCV(BGR) -> Pillow(RGB)変換
@@ -216,8 +243,7 @@ class Application(ttk.Frame):
                                                         minSize=(320, 320))
         # 顔が検出された場合
         if len(facerect) > 0:
-            # 一時停止してその間にサーマルセンサ制御を実行する
-            self.pause_timer = FACE_DETECTIION_PAUSE
+            is_detect = True
             # 検出した場所すべてに緑色で枠を描画する
             for rect in facerect:
                 cv2.rectangle(frame_color,
@@ -227,35 +253,41 @@ class Application(ttk.Frame):
                                 thickness=3)
 
         else:
-            self.pause_timer = 0
+            is_detect = False
 
         # OpenCV frame -> Pillow Photo
         self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
         # Pillow Photo -> Canvas
-        self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
+        self.canvas_camera.create_image(0, 0, image = self.photo, anchor = 'nw')
 
+        return is_detect
 
     ##########################################################################
-    # サーマルセンサ(AMG8833) サーミスタ制御
+    # サーマルセンサ(AMG8833) サーミスタ 温度取得
     ##########################################################################
-    def ctrl_thermal_thermistor(self):
+    def thermal_get_thermistor(self):
         # サーミスタ温度
-        self.thermistor_temp = round(self.sensor.temperature, 1)     
+        self.thermistor_temp = round(self.sensor.temperature, 2)     
 
     ##########################################################################
-    # サーマルセンサ(AMG8833) 赤外線アレイセンサ制御
+    # サーマルセンサ(AMG8833) 赤外線アレイセンサ 温度取得
     ##########################################################################
-    def ctrl_thermal_temperature(self):
+    def thermal_get_temperature(self, index):
         # 検出温度
         pixels_array = np.array(self.sensor.pixels)
         # 検出温度(最大値)
-        self.pixels_max = np.amax(pixels_array)
-        # サーミスタ温度補正
-        self.offset_temp = round((-0.6857 * self.thermistor_temp + 28), 1)
-        # 体温
-        self.body_temp = round((self.pixels_max + self.offset_temp), 1)
+        self.sensor_temp[index] = np.amax(pixels_array)
 
-        # print(self.body_temp_array)
+    ##########################################################################
+    # サーマルセンサ(AMG8833) 体温の算出
+    ##########################################################################
+    def thermal_make_body_temp(self):
+        # サーミスタ温度補正
+        self.offset_temp = round((-0.6857 * self.thermistor_temp + 28), 2)
+        # 検出温度　平均値
+        self.sensor_temp_ave = round((self.sensor_temp[0] + self.sensor_temp[1]) / 2, 2)
+        # 体温
+        self.body_temp = round((self.sensor_temp_ave + self.offset_temp), 1)
 
 if __name__ == '__main__':
     root = Tk()
