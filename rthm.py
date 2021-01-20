@@ -3,6 +3,8 @@ from tkinter import *
 from tkinter import ttk
 from tkinter import messagebox
 import time
+import datetime
+import csv
 import busio
 import board
 import adafruit_amg88xx
@@ -39,6 +41,8 @@ class Application(ttk.Frame):
         self.thermistor_temp = 0.0
         # オフセット値
         self.offset_temp = 0.0
+        # 基準体温との差分
+        self.standard_diff = 0.0
 
         self.pack()
         # ウィンドウをスクリーンの中央に配置
@@ -47,6 +51,8 @@ class Application(ttk.Frame):
         self.create_widgets()
         # デバイスの初期化
         self.init_device()
+        # CSV出力の初期設定
+        self.init_csv()
         
         if self.camera.isOpened():
             # 周期処理
@@ -59,7 +65,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def setting_window(self, master):
         w = 500                             # ウィンドウの横幅
-        h = 700                             # ウィンドウの高さ
+        h = 760                             # ウィンドウの高さ
         sw = master.winfo_screenwidth()     # スクリーンの横幅
         sh = master.winfo_screenheight()    # スクリーンの高さ
         # ウィンドウをスクリーンの中央に配置
@@ -74,14 +80,21 @@ class Application(ttk.Frame):
     def create_widgets(self):
         # フレーム(上部)
         frame_upper = ttk.Frame(self)
-        frame_upper.grid(row=0, padx=10, pady=10, sticky='NW')
+        frame_upper.grid(row=0, padx=10, pady=(10,0), sticky='NW')
+        self.label_msg = ttk.Label(frame_upper, font=('',20))
+        self.label_msg.grid(row=0, sticky='NW')
+        self.label_body_tmp = ttk.Label(frame_upper, font=('',30))
+        self.label_body_tmp.grid(row=1, sticky='NW')
+        # フレーム(中央部)
+        frame_middle = ttk.Frame(self)
+        frame_middle.grid(row=1, padx=10, pady=(10,0), sticky='NW')
         # カメラの映像を表示するキャンバスを用意する
-        self.canvas_camera = Canvas(frame_upper, width=480, height=480)
+        self.canvas_camera = Canvas(frame_middle, width=480, height=480)
         self.canvas_camera.pack()
 
         # フレーム(下部)
         frame_lower = ttk.Frame(self)
-        frame_lower.grid(row=1, padx=10, pady=10, sticky='NW')
+        frame_lower.grid(row=2, padx=10, pady=(10,0), sticky='NW')
         
         self.label_sns_tmp1 = ttk.Label(frame_lower)
         self.label_sns_tmp1.grid(row=0, sticky='NW')
@@ -93,20 +106,23 @@ class Application(ttk.Frame):
         self.label_env_tmp.grid(row=3, sticky='NW')
         self.label_offset_tmp = ttk.Label(frame_lower)
         self.label_offset_tmp.grid(row=4, sticky='NW')
-        self.label_body_tmp = ttk.Label(frame_lower)
-        self.label_body_tmp.grid(row=5, sticky='NW')
+        self.label_standard_diff = ttk.Label(frame_lower)
+        self.label_standard_diff.grid(row=5, sticky='NW')
+
         self.init_param_widgets()
 
     ##########################################################################
     # 計測データ ウィジット 初期化
     ##########################################################################
     def init_param_widgets(self):        
-        self.label_sns_tmp1.config(text='検出温度(1回目)：--.- ℃')
-        self.label_sns_tmp2.config(text='検出温度(2回目)：--.- ℃')
-        self.label_sns_tmp_ave.config(text='検出温度(平均値)：--.- ℃')
-        self.label_env_tmp.config(text='サーミスタ温度：--.- ℃')
-        self.label_offset_tmp.config(text='オフセット値：--.- ℃')
-        self.label_body_tmp.config(text='体温：--.- ℃')
+        self.label_msg.config(text='顔が青枠に合うよう近づいてください')
+        self.label_body_tmp.config(text='体温：--.-- ℃')
+        self.label_sns_tmp1.config(text='検出温度(1回目)：--.-- ℃')
+        self.label_sns_tmp2.config(text='検出温度(2回目)：--.-- ℃')
+        self.label_sns_tmp_ave.config(text='検出温度(平均値)：--.-- ℃')
+        self.label_env_tmp.config(text='サーミスタ温度：--.-- ℃')
+        self.label_offset_tmp.config(text='オフセット値：--.-- ℃')
+        self.label_standard_diff.config(text='基準体温との差分：--.-- ℃')
     
     ##########################################################################
     # 計測データ ウィジット 表示更新
@@ -117,14 +133,25 @@ class Application(ttk.Frame):
         self.label_sns_tmp_ave.config(text='検出温度(平均値)：' + str(self.sensor_temp_ave) + ' ℃')
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
+        self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
+
         self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
+
+        if self.body_temp >= 38.0:
+            self.label_msg.config(text='体温が高いので、検温をお願いします')
+        else:
+            self.label_msg.config(text='体温は正常です')
         
-        print(str(self.sensor_temp[0]) + ',' +
-              str(self.sensor_temp[1]) + ',' +
-              str(self.sensor_temp_ave) + ',' +
-              str(self.thermistor_temp) + ',' +
-              str(self.offset_temp) +  ',' +
-              str(self.body_temp))
+        # print(str(self.sensor_temp[0]) + ',' +
+        #       str(self.sensor_temp[1]) + ',' +
+        #       str(self.sensor_temp_ave) + ',' +
+        #       str(self.thermistor_temp) + ',' +
+        #       str(self.offset_temp) +  ',' +
+        #       str(self.standard_diff) +  ',' +
+        #       str(self.body_temp))
+
+        # CSV出力
+        self.csv_output()
 
     ##########################################################################
     # デバイスの初期化
@@ -158,6 +185,37 @@ class Application(ttk.Frame):
         self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
         # センサの初期化待ち
         time.sleep(.1)
+
+    ##########################################################################
+    # CSV出力の初期設定
+    ##########################################################################
+    def init_csv(self):
+        #現在時刻取得
+        now = datetime.datetime.today()     
+        hourstr = '_' + now.strftime('%H')
+        minutestr = '_' + now.strftime('%M')
+        #csvファイルの生成
+        self.filename = 'amg8833_temp_' + now.strftime('%Y%m%d') + hourstr + minutestr + '.csv'
+                
+        with open(self.filename, 'a', newline='') as f:
+            writer = csv.writer(f)
+            #1行目：見出し
+            writer.writerow(['検出温度(1回目)','検出温度(2回目)','検出温度(平均値)',
+                             'サーミスタ温度','オフセット値','基準体温との差分','体温'])
+
+    ##########################################################################
+    # CSV出力
+    ##########################################################################
+    def csv_output(self):
+        #csvファイルの生成
+        with open(self.filename, 'a', newline='') as f:
+            writer = csv.writer(f)
+            #csvファイルへの書き込みデータ
+            data = [self.sensor_temp[0],self.sensor_temp[1],self.sensor_temp_ave,
+                    self.thermistor_temp,self.offset_temp,self.standard_diff,self.body_temp]
+            #データの書き込み
+            writer.writerow(data)
+            f.flush()
 
     ##########################################################################
     # 周期処理
@@ -207,6 +265,7 @@ class Application(ttk.Frame):
                 # 計測データ 表示更新
                 self.update_param_widgets()
             else:
+                # そして時は動き出す・・・
                 pass
 
             self.pause_timer -= 1
@@ -257,6 +316,8 @@ class Application(ttk.Frame):
         else:
             is_detect = False
 
+        # ガイド枠の描画
+        cv2.rectangle(frame_color, (60,60), (420,420), (0,0,255), thickness=3)
         # OpenCV frame -> Pillow Photo
         self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
         # Pillow Photo -> Canvas
@@ -287,7 +348,7 @@ class Application(ttk.Frame):
         # 検出温度　平均値
         self.sensor_temp_ave = round((self.sensor_temp[0] + self.sensor_temp[1]) / 2, 2)
         # 基準体温との差分
-        # self.offset_temp = round((BODY_TEMP_STANDARD - self.sensor_temp_ave), 2)
+        self.standard_diff = round((BODY_TEMP_STANDARD - self.sensor_temp_ave), 2)
         # サーミスタ温度補正
         self.offset_temp = round((0.8424 * self.thermistor_temp - 3.2523), 2)
         # 体温
