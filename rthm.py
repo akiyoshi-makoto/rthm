@@ -16,6 +16,7 @@ import PIL.Image, PIL.ImageTk
 I2C_ADR = 0x68              # I2C アドレス
 PROC_CYCLE = 30             # 処理周期[msec]
 FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000msec]
+BODY_TEMP_STANDARD = 36.2   # 体温の基準値[℃]
 
 ##############################################################################
 # クラス：Application
@@ -29,11 +30,11 @@ class Application(ttk.Frame):
         # 一時停止中の経過時間
         self.the_world_timer = 0
         # 検出温度
-        self.sensor_temp = [0.0, 0.0]
+        self.sensor_temp = [BODY_TEMP_STANDARD, BODY_TEMP_STANDARD]
         # 検出温度(平均値)
-        self.sensor_temp_ave = 0.0
+        self.sensor_temp_ave = BODY_TEMP_STANDARD
         # 体温
-        self.body_temp = 0.0
+        self.body_temp = BODY_TEMP_STANDARD
         # サーミスタ温度
         self.thermistor_temp = 0.0
         # オフセット値
@@ -118,11 +119,11 @@ class Application(ttk.Frame):
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
         self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
         
-        print(str(self.sensor_temp[0]) + '  ' +
-              str(self.sensor_temp[1]) + '  ' +
-              str(self.sensor_temp_ave) + '  ' +
-              str(self.thermistor_temp) + '  ' +
-              str(self.offset_temp) +  '  ' +
+        print(str(self.sensor_temp[0]) + ',' +
+              str(self.sensor_temp[1]) + ',' +
+              str(self.sensor_temp_ave) + ',' +
+              str(self.thermistor_temp) + ',' +
+              str(self.offset_temp) +  ',' +
               str(self.body_temp))
 
     ##########################################################################
@@ -251,7 +252,8 @@ class Application(ttk.Frame):
                                 tuple(rect[0:2]+rect[2:4]),
                                 (0, 255, 0),
                                 thickness=3)
-
+            
+            # print(rect)
         else:
             is_detect = False
 
@@ -282,10 +284,12 @@ class Application(ttk.Frame):
     # サーマルセンサ(AMG8833) 体温の算出
     ##########################################################################
     def thermal_make_body_temp(self):
-        # サーミスタ温度補正
-        self.offset_temp = round((-0.6857 * self.thermistor_temp + 28), 2)
         # 検出温度　平均値
         self.sensor_temp_ave = round((self.sensor_temp[0] + self.sensor_temp[1]) / 2, 2)
+        # 基準体温との差分
+        # self.offset_temp = round((BODY_TEMP_STANDARD - self.sensor_temp_ave), 2)
+        # サーミスタ温度補正
+        self.offset_temp = round((0.8424 * self.thermistor_temp - 3.2523), 2)
         # 体温
         self.body_temp = round((self.sensor_temp_ave + self.offset_temp), 1)
 
