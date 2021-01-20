@@ -22,13 +22,7 @@ FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000m
 class Application(ttk.Frame):
     def __init__(self, master=None):
         ttk.Frame.__init__(self, master)
-        self.master = master
-        self.pack()
-        # ウィンドウをスクリーンの中央に配置
-        self.setting_window(master)
 
-        # 周期処理実行許可フラグ(True:許可 False:禁止)
-        self.cycle_proc_exec = True
         # 顔検出時の一時停止タイマ
         self.pause_timer = 0
         # 一時停止中の経過時間
@@ -42,12 +36,19 @@ class Application(ttk.Frame):
         # オフセット値
         self.offset_temp = 0.0
 
+        self.pack()
+        # ウィンドウをスクリーンの中央に配置
+        self.setting_window(master)
         # ウィジットを生成
         self.create_widgets()
         # デバイスの初期化
         self.init_device()
-        # 周期処理
-        self.cycle_proc()
+        
+        if self.video_camera.isOpened():
+            # 周期処理
+            self.cycle_proc()
+        else:
+            print('カメラ認識エラー')
 
     ##########################################################################
     # ウィンドウをスクリーンの中央に配置
@@ -136,6 +137,62 @@ class Application(ttk.Frame):
         self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
 
     ##########################################################################
+    # サーマルセンサ(AMG8833) 初期化
+    ##########################################################################
+    def init_thermal_sensor(self):   
+        # I2Cバスの初期化
+        i2c_bus = busio.I2C(board.SCL, board.SDA)
+        # センサの初期化
+        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
+        # センサの初期化待ち
+        time.sleep(.1)
+
+    ##########################################################################
+    # 周期処理
+    ##########################################################################
+    def cycle_proc(self):
+        if self.pause_timer == 0:
+            # 停止画取得処理
+            self.read_video_frame()
+            # 顔認識処理
+            self.detect_face()
+            # 計測データ ウィジット 初期化
+            self.init_param_widgets()
+            self.the_world_timer = 0
+
+        elif self.pause_timer < 10:
+            self.pause_timer -= 1
+            # 停止画取得処理
+            # バッファに停止画が残っている場合を想定して顔認識をせずに停止画取得のみ行う
+            self.read_video_frame()
+
+        elif self.pause_timer >= 10:
+            self.pause_timer -= 1
+
+            # ザ・ワールド !!!!
+            if self.the_world_timer == 0:
+                # サーマルセンサ(AMG8833) サーミスタ制御
+                self.ctrl_thermal_thermistor()
+            elif self.the_world_timer == 1:
+                # サーマルセンサ(AMG8833) 赤外線アレイセンサ制御
+                self.ctrl_thermal_temperature()
+            elif self.the_world_timer == 2:    
+                # 計測データ 表示更新
+                self.update_param_widgets()
+            else:
+                pass
+
+            self.the_world_timer += 1
+
+        else:
+            # 設計上、負の値になることはないが、ロバスト性に配慮
+            self.pause_timer = 0
+            self.the_world_timer = 0
+
+        # 周期処理
+        self.after(PROC_CYCLE, self.cycle_proc)
+
+    ##########################################################################
     # 停止画取得処理
     ##########################################################################
     def read_video_frame(self):
@@ -177,16 +234,6 @@ class Application(ttk.Frame):
         # Pillow Photo -> Canvas
         self.canvas_video.create_image(0, 0, image = self.photo, anchor = 'nw')
 
-    ##########################################################################
-    # サーマルセンサ(AMG8833) 初期化
-    ##########################################################################
-    def init_thermal_sensor(self):   
-        # I2Cバスの初期化
-        i2c_bus = busio.I2C(board.SCL, board.SDA)
-        # センサの初期化
-        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
-        # センサの初期化待ち
-        time.sleep(.1)
 
     ##########################################################################
     # サーマルセンサ(AMG8833) サーミスタ制御
@@ -210,75 +257,7 @@ class Application(ttk.Frame):
 
         # print(self.body_temp_array)
 
-    ##########################################################################
-    # 周期処理
-    ##########################################################################
-    def cycle_proc(self):
-        # 周期処理実行許可
-        if self.cycle_proc_exec:
-            if self.video_camera.isOpened():
-                if self.pause_timer == 0:
-                    # 停止画取得処理
-                    self.read_video_frame()
-                    # 顔認識処理
-                    self.detect_face()
-                    # 計測データ ウィジット 初期化
-                    self.init_param_widgets()
-                    self.the_world_timer = 0
-
-                elif self.pause_timer < 10:
-                    self.pause_timer -= 1
-                    # 停止画取得処理
-                    # バッファに停止画が残っている場合を想定して顔認識をせずに停止画取得のみ行う
-                    self.read_video_frame()
-
-                elif self.pause_timer >= 10:
-                    self.pause_timer -= 1
-
-                    # ザ・ワールド !!!!
-                    if self.the_world_timer == 0:
-                        # サーマルセンサ(AMG8833) サーミスタ制御
-                        self.ctrl_thermal_thermistor()
-                    elif self.the_world_timer == 1:
-                        # サーマルセンサ(AMG8833) 赤外線アレイセンサ制御
-                        self.ctrl_thermal_temperature()
-                    elif self.the_world_timer == 2:    
-                        # 計測データ 表示更新
-                        self.update_param_widgets()
-                    else:
-                        pass
-
-                    self.the_world_timer += 1
-
-                else:
-                    # 設計上、負の値になることはないが、ロバスト性に配慮
-                    self.pause_timer = 0
-                    self.the_world_timer = 0
-            else:
-                print('カメラ認識エラー')
-        else:
-            self.end_application()
-
-        # 周期処理
-        self.after(PROC_CYCLE, self.cycle_proc)
-
-    ##########################################################################
-    # アプリケーション終了処理
-    ##########################################################################
-    def end_application(self):
-        self.video_camera.release()
-        # メインウインドウを閉じる
-        self.master.destroy()
-
-    ##########################################################################
-    # 閉じるボタンが押下された場合の処理
-    ##########################################################################
-    def on_close_button(self):
-        # 周期処理実行禁止
-        self.cycle_proc_exec = False
-
 if __name__ == '__main__':
     root = Tk()
     app = Application(master=root)
-    root.protocol('WM_DELETE_WINDOW', app.on_close_button)
     app.mainloop()
