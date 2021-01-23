@@ -20,7 +20,7 @@ I2C_ADR = 0x68              # I2C アドレス
 PROC_CYCLE = 30             # 処理周期[msec]
 FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000msec]
 BODY_TEMP_STANDARD = 36.2   # 体温の基準値[℃]
-LOG_PATH = './log_file/'
+LOG_PATH = './log_file/'    # ログファイル保存パス
 
 ##############################################################################
 # クラス：Application
@@ -45,6 +45,8 @@ class Application(ttk.Frame):
         self.offset_temp = 0.0
         # 基準体温との差分
         self.standard_diff = 0.0
+        # 顔認識範囲(x座標, y座標, 横幅, 縦幅)
+        self.facerect = [[]]
 
         self.pack()
         # ウィンドウをスクリーンの中央に配置
@@ -67,7 +69,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def setting_window(self, master):
         w = 500                             # ウィンドウの横幅
-        h = 760                             # ウィンドウの高さ
+        h = 780                             # ウィンドウの高さ
         sw = master.winfo_screenwidth()     # スクリーンの横幅
         sh = master.winfo_screenheight()    # スクリーンの高さ
         # ウィンドウをスクリーンの中央に配置
@@ -110,6 +112,8 @@ class Application(ttk.Frame):
         self.label_offset_tmp.grid(row=4, sticky='NW')
         self.label_standard_diff = ttk.Label(frame_lower)
         self.label_standard_diff.grid(row=5, sticky='NW')
+        self.label_facerect = ttk.Label(frame_lower)
+        self.label_facerect.grid(row=6, sticky='NW')
 
         self.init_param_widgets()
 
@@ -125,35 +129,39 @@ class Application(ttk.Frame):
         self.label_env_tmp.config(text='サーミスタ温度：--.-- ℃')
         self.label_offset_tmp.config(text='オフセット値：--.-- ℃')
         self.label_standard_diff.config(text='基準体温との差分：--.-- ℃')
+        self.label_facerect.config(text='顔領域サイズ：---')
     
     ##########################################################################
     # 計測データ ウィジット 表示更新
     ##########################################################################
     def update_param_widgets(self):
-        self.label_sns_tmp1.config(text='検出温度(1回目)：' + str(self.sensor_temp[0]) + ' ℃')
-        self.label_sns_tmp2.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
-        self.label_sns_tmp_ave.config(text='検出温度(平均値)：' + str(self.sensor_temp_ave) + ' ℃')
-        self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
-        self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
-        self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
+        # 認識した顔がひとつの場合
+        if len(self.facerect) == 1:
+            self.label_sns_tmp1.config(text='検出温度(1回目)：' + str(self.sensor_temp[0]) + ' ℃')
+            self.label_sns_tmp2.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
+            self.label_sns_tmp_ave.config(text='検出温度(平均値)：' + str(self.sensor_temp_ave) + ' ℃')
+            self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
+            self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
+            self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
+            self.label_facerect.config(text='顔領域サイズ：'+ str(self.facerect[0][2]))
 
-        self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
+            if self.facerect[0][2] < 320:
+                self.label_body_tmp.config(text='体温：--.-- ℃')
+                self.label_msg.config(text='もう少し近づいてください')
+            elif self.facerect[0][2] > 390:
+                self.label_body_tmp.config(text='体温：--.-- ℃')
+                self.label_msg.config(text='もう少し離れてください')
+            else:
+                self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
 
-        if self.body_temp >= 38.0:
-            self.label_msg.config(text='体温が高いので、検温をお願いします')
+                if self.body_temp >= 38.0:
+                    self.label_msg.config(text='体温が高いです！検温してください')
+                else:
+                    self.label_msg.config(text='体温は正常です！問題ありません')
+            # CSV出力
+            self.csv_output()
         else:
-            self.label_msg.config(text='体温は正常です')
-        
-        # print(str(self.sensor_temp[0]) + ',' +
-        #       str(self.sensor_temp[1]) + ',' +
-        #       str(self.sensor_temp_ave) + ',' +
-        #       str(self.thermistor_temp) + ',' +
-        #       str(self.offset_temp) +  ',' +
-        #       str(self.standard_diff) +  ',' +
-        #       str(self.body_temp))
-
-        # CSV出力
-        self.csv_output()
+            self.label_msg.config(text='体温計測は一人ずつです')
 
     ##########################################################################
     # デバイスの初期化
@@ -229,9 +237,9 @@ class Application(ttk.Frame):
             # 停止画取得
             self.camera_get_frame()
             # 顔認識処理
-            is_detect = self.camera_detect_face()
+            self.camera_detect_face()
 
-            if is_detect:
+            if len(self.facerect) > 0:
                 # 一時停止している間に体温を測定する
                 self.pause_timer = FACE_DETECTIION_PAUSE
             else:
@@ -299,33 +307,23 @@ class Application(ttk.Frame):
         # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
         frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
         # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
-        facerect = self.face_cascade.detectMultiScale(frame_gray,
+        self.facerect = self.face_cascade.detectMultiScale(frame_gray,
                                                         scaleFactor=1.2,
                                                         minNeighbors=2,
-                                                        minSize=(320, 320))
-        # 顔が検出された場合
-        if len(facerect) > 0:
-            is_detect = True
-            # 検出した場所すべてに緑色で枠を描画する
-            for rect in facerect:
-                cv2.rectangle(frame_color,
-                                tuple(rect[0:2]),
-                                tuple(rect[0:2]+rect[2:4]),
-                                (0, 255, 0),
-                                thickness=3)
-            
-            # print(rect)
-        else:
-            is_detect = False
-
+                                                        minSize=(150, 150))
+        # 検出した場所すべてに緑色で枠を描画する
+        for rect in self.facerect:
+            cv2.rectangle(frame_color,
+                            tuple(rect[0:2]),
+                            tuple(rect[0:2]+rect[2:4]),
+                            (0, 255, 0),
+                            thickness=3)
         # ガイド枠の描画
         cv2.rectangle(frame_color, (60,60), (420,420), (0,0,255), thickness=3)
         # OpenCV frame -> Pillow Photo
         self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
         # Pillow Photo -> Canvas
         self.canvas_camera.create_image(0, 0, image = self.photo, anchor = 'nw')
-
-        return is_detect
 
     ##########################################################################
     # サーマルセンサ(AMG8833) サーミスタ 温度取得
