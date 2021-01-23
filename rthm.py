@@ -190,32 +190,29 @@ class Application(ttk.Frame):
     # CSV出力の初期設定
     ##########################################################################
     def init_csv(self):
-        #現在時刻取得
+        # 現在時刻取得
         now = datetime.datetime.today()     
-        hourstr = '_' + now.strftime('%H')
-        minutestr = '_' + now.strftime('%M')
-        #csvファイルの生成
-        self.filename = 'amg8833_temp_' + now.strftime('%Y%m%d') + hourstr + minutestr + '.csv'
-                
-        with open(self.filename, 'a', newline='') as f:
-            writer = csv.writer(f)
-            #1行目：見出し
-            writer.writerow(['検出温度(1回目)','検出温度(2回目)','検出温度(平均値)',
-                             'サーミスタ温度','オフセット値','基準体温との差分','体温'])
+        now_str = now.strftime('%y%m%d-%H%M%S')
+        # csvファイルの生成
+        self.filename = now_str + '.csv'
+        with open(self.filename, 'a', newline='') as csvfile:
+            file = csv.writer(csvfile)
+            # 1行目：見出し
+            file.writerow(['検出温度(1回目)','検出温度(2回目)','検出温度(平均値)',
+                           'サーミスタ温度','オフセット値','基準体温との差分','体温'])
 
     ##########################################################################
     # CSV出力
     ##########################################################################
     def csv_output(self):
-        #csvファイルの生成
-        with open(self.filename, 'a', newline='') as f:
-            writer = csv.writer(f)
-            #csvファイルへの書き込みデータ
+        # csvファイルの生成
+        with open(self.filename, 'a', newline='') as csvfile:
+            file = csv.writer(csvfile)
+            # csvファイルへの書き込みデータ
             data = [self.sensor_temp[0],self.sensor_temp[1],self.sensor_temp_ave,
                     self.thermistor_temp,self.offset_temp,self.standard_diff,self.body_temp]
-            #データの書き込み
-            writer.writerow(data)
-            f.flush()
+            # データの書き込み
+            file.writerow(data)
 
     ##########################################################################
     # 周期処理
