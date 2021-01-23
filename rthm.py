@@ -4,6 +4,7 @@ from tkinter import ttk
 from tkinter import messagebox
 import time
 import datetime
+import os
 import csv
 import busio
 import board
@@ -19,6 +20,7 @@ I2C_ADR = 0x68              # I2C アドレス
 PROC_CYCLE = 30             # 処理周期[msec]
 FACE_DETECTIION_PAUSE = 100 # 顔検出時の一時停止周期[30msec*100=3000msec]
 BODY_TEMP_STANDARD = 36.2   # 体温の基準値[℃]
+LOG_PATH = './log_file/'
 
 ##############################################################################
 # クラス：Application
@@ -190,11 +192,14 @@ class Application(ttk.Frame):
     # CSV出力の初期設定
     ##########################################################################
     def init_csv(self):
+        # フォルダの存在チェック
+        if not os.path.isdir(LOG_PATH):
+            os.makedirs(LOG_PATH)
         # 現在時刻取得
         now = datetime.datetime.today()     
         now_str = now.strftime('%y%m%d-%H%M%S')
         # csvファイルの生成
-        self.filename = now_str + '.csv'
+        self.filename = LOG_PATH + now_str + '.csv'
         with open(self.filename, 'a', newline='') as csvfile:
             file = csv.writer(csvfile)
             # 1行目：見出し
