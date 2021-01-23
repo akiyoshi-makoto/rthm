@@ -334,9 +334,13 @@ class Application(ttk.Frame):
     ##########################################################################
     def thermal_get_temperature(self, index):
         # 検出温度
-        pixels_array = np.array(self.sensor.pixels)
+        temp = np.array(self.sensor.pixels)
+        # ガイド枠の内側部分で検出した温度のみを採用
+        # temp_select = temp[1:7,1:7]
+        # print(temp)
+        # print(temp_select)
         # 検出温度(最大値)
-        self.sensor_temp[index] = np.amax(pixels_array)
+        self.sensor_temp[index] = np.amax(temp)
 
     ##########################################################################
     # サーマルセンサ(AMG8833) 体温の算出
