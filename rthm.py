@@ -20,16 +20,15 @@ import PIL.Image, PIL.ImageTk
 I2C_ADR = 0x68                      # I2C アドレス
 PROC_CYCLE = 30                     # 処理周期[msec]
 FACE_DETECTIION_PAUSE_LONG = 100    # 顔検出成功時の一時停止周期[30msec*100=3000msec]
-FACE_DETECTIION_PAUSE_SHORT = 30    # 顔検出失敗時の一時停止周期[30msec*50=1500msec]
+FACE_DETECTIION_PAUSE_SHORT = 30    # 顔検出失敗時の一時停止周期[30msec*30=900msec]
 BODY_TEMP_STANDARD = 36.2           # 体温の基準値[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
-class DetectFace(Enum):
+# 周期処理状態
+class CycleProcState(Enum):
     WAIT_DETECT = 0                 # 顔認識待ち
-    SUCCESS = 1                     # 顔認識成功
-    DISTACE_NEAR = 2                # 距離が近すぎる
-    DISTACE_FAR = 3                 # 距離が遠すぎる
-    DETECT_NOT_ONE = 4              # 複数の顔を認識している
+    PAUSE_SHORT = 1                 # 一時停止(ショート)
+    PUASE_LONG = 2                  # 一時停止(ロング)
     
 ##############################################################################
 # クラス：Application
@@ -54,8 +53,8 @@ class Application(ttk.Frame):
         self.offset_temp = 0.0
         # 基準体温との差分
         self.standard_diff = 0.0
-        # 顔認識処理結果
-        self.result_detect_face = DetectFace.WAIT_DETECT
+        # 周期処理状態
+        self.cycle_proc_state = CycleProcState.WAIT_DETECT
         
         self.pack()
         # ウィンドウをスクリーンの中央に配置
@@ -128,8 +127,10 @@ class Application(ttk.Frame):
     # 計測データ ウィジット 初期化
     ##########################################################################
     def init_param_widgets(self):        
+        # フレーム(上部)
         self.label_msg.config(text='顔が青枠に合うよう近づいてください')
         self.label_body_tmp.config(text='体温：--.-- ℃')
+        # フレーム(下部)
         self.label_sns_tmp1.config(text='検出温度(1回目)：--.-- ℃')
         self.label_sns_tmp2.config(text='検出温度(2回目)：--.-- ℃')
         self.label_sns_tmp_ave.config(text='検出温度(平均値)：--.-- ℃')
@@ -141,19 +142,19 @@ class Application(ttk.Frame):
     # 計測データ ウィジット 表示更新
     ##########################################################################
     def update_param_widgets(self):
+        # フレーム(上部)
+        if self.body_temp >= 38.0:
+            self.label_msg.config(text='体温が高いです！検温してください')
+        else:
+            self.label_msg.config(text='体温は正常です！問題ありません')
+        self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
+        # フレーム(下部)
         self.label_sns_tmp1.config(text='検出温度(1回目)：' + str(self.sensor_temp[0]) + ' ℃')
         self.label_sns_tmp2.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
         self.label_sns_tmp_ave.config(text='検出温度(平均値)：' + str(self.sensor_temp_ave) + ' ℃')
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
         self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
-
-        self.label_body_tmp.config(text='体温：' + str(self.body_temp) + ' ℃')
-
-        if self.body_temp >= 38.0:
-            self.label_msg.config(text='体温が高いです！検温してください')
-        else:
-            self.label_msg.config(text='体温は正常です！問題ありません')
         # CSV出力
         self.csv_output()
 
@@ -226,19 +227,42 @@ class Application(ttk.Frame):
     ##########################################################################
     def cycle_proc(self):
         # 顔認識待ち
-        if self.result_detect_face == DetectFace.WAIT_DETECT:
+        if self.cycle_proc_state == CycleProcState.WAIT_DETECT:
             # 停止画取得
             self.camera_get_frame()
-            # 計測データ ウィジット 初期化
-            self.init_param_widgets()
             # 顔認識処理
-            self.camera_detect_face()
-
-        # 距離が近すぎる
-        elif self.result_detect_face == DetectFace.DISTACE_NEAR:
-            
+            facerect = self.camera_detect_face()
+            # 認識した顔が一つの場合
+            if len(facerect) == 1:
+                # print(facerect[0][2])
+                if facerect[0][2] < 320:
+                    self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
+                    self.cycle_proc_state = CycleProcState.PAUSE_SHORT
+                    self.label_msg.config(text='もう少し近づいてください')
+                elif facerect[0][2] > 390:
+                    self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
+                    self.cycle_proc_state = CycleProcState.PAUSE_SHORT
+                    self.label_msg.config(text='もう少し離れてください')
+                else:
+                    self.pause_timer = FACE_DETECTIION_PAUSE_LONG
+                    self.the_world_timer = 0
+                    self.cycle_proc_state = CycleProcState.PUASE_LONG
+            # 認識した顔が複数の場合
+            elif len(facerect) > 1:
+                self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
+                self.cycle_proc_state = CycleProcState.PAUSE_SHORT
+                self.label_msg.config(text='体温計測は一人ずつです')
+            # 顔認識をしなかった場合
+            else:
+                self.pause_timer = 0
+                self.cycle_proc_state = CycleProcState.WAIT_DETECT
+        
+        # 一時停止(ショート)
+        elif self.cycle_proc_state == CycleProcState.PAUSE_SHORT:
             if self.pause_timer == 0:
-                self.result_detect_face = DetectFace.WAIT_DETECT
+                self.cycle_proc_state = CycleProcState.WAIT_DETECT
+                # 計測データ ウィジット 初期化
+                self.init_param_widgets()
             elif self.pause_timer < 10:
                 # 停止画取得
                 self.camera_get_frame()
@@ -246,41 +270,12 @@ class Application(ttk.Frame):
             else:
                 self.pause_timer -= 1
 
-            self.label_msg.config(text='もう少し離れてください')
-
-        # 距離が遠すぎる
-        elif self.result_detect_face == DetectFace.DISTACE_FAR:
-            
+        # 一時停止(ロング)
+        elif self.cycle_proc_state == CycleProcState.PUASE_LONG:
             if self.pause_timer == 0:
-                self.result_detect_face = DetectFace.WAIT_DETECT
-            elif self.pause_timer < 10:
-                # 停止画取得
-                self.camera_get_frame()
-                self.pause_timer -= 1
-            else:
-                self.pause_timer -= 1
-
-            self.label_msg.config(text='もう少し近づいてください')
-
-        # 複数の顔を認識している
-        elif self.result_detect_face == DetectFace.DETECT_NOT_ONE:
-            
-            if self.pause_timer == 0:
-                self.result_detect_face = DetectFace.WAIT_DETECT
-            elif self.pause_timer < 10:
-                # 停止画取得
-                self.camera_get_frame()
-                self.pause_timer -= 1
-            else:
-                self.pause_timer -= 1
-
-            self.label_msg.config(text='体温計測は一人ずつです')
-
-        # 顔認識成功
-        else:
-
-            if self.pause_timer == 0:
-                self.result_detect_face = DetectFace.WAIT_DETECT
+                self.cycle_proc_state = CycleProcState.WAIT_DETECT
+                # 計測データ ウィジット 初期化
+                self.init_param_widgets()
             elif self.pause_timer < 10:
                 # 停止画取得
                 self.camera_get_frame()
@@ -310,6 +305,11 @@ class Application(ttk.Frame):
 
                 self.pause_timer -= 1
                 self.the_world_timer += 1
+        # 設計上ありえないがロバスト性に配慮
+        else:
+            print('[error] cycle_proc')
+            self.pause_timer = 0
+            self.cycle_proc_state = CycleProcState.WAIT_DETECT
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
@@ -333,9 +333,9 @@ class Application(ttk.Frame):
         frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
         # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
         facerect = self.face_cascade.detectMultiScale(frame_gray,
-                                                        scaleFactor=1.2,
-                                                        minNeighbors=2,
-                                                        minSize=(150, 150))
+                                                      scaleFactor=1.2,
+                                                      minNeighbors=2,
+                                                      minSize=(150, 150))
         # 検出した場所すべてに緑色で枠を描画する
         for rect in facerect:
             cv2.rectangle(frame_color,
@@ -343,34 +343,14 @@ class Application(ttk.Frame):
                             tuple(rect[0:2]+rect[2:4]),
                             (0, 255, 0),
                             thickness=3)
-        # 認識した顔が一つの場合
-        if len(facerect) == 1:
-            # print(facerect[0][2])
-            if facerect[0][2] < 320:
-                self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
-                self.result_detect_face = DetectFace.DISTACE_FAR
-            elif facerect[0][2] > 390:
-                self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
-                self.result_detect_face = DetectFace.DISTACE_NEAR
-            else:
-                self.pause_timer = FACE_DETECTIION_PAUSE_LONG
-                self.the_world_timer = 0
-                self.result_detect_face = DetectFace.SUCCESS
-        # 認識した顔が複数の場合
-        elif len(facerect) > 1:
-            self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
-            self.result_detect_face = DetectFace.DETECT_NOT_ONE
-        # 顔認識をしなかった場合
-        else:
-            self.pause_timer = 0
-            self.result_detect_face = DetectFace.WAIT_DETECT
-
         # ガイド枠の描画
         cv2.rectangle(frame_color, (60,60), (420,420), (0,0,255), thickness=3)
         # OpenCV frame -> Pillow Photo
         self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
         # Pillow Photo -> Canvas
         self.canvas_camera.create_image(0, 0, image = self.photo, anchor = 'nw')
+
+        return facerect
 
     ##########################################################################
     # サーマルセンサ(AMG8833) サーミスタ 温度取得
