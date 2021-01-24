@@ -6,6 +6,7 @@ from enum import Enum
 import time
 import datetime
 import os
+import RPi.GPIO as GPIO
 import csv
 import busio
 import board
@@ -13,6 +14,7 @@ import adafruit_amg88xx
 import cv2
 import numpy as np
 import PIL.Image, PIL.ImageTk
+
 
 ##############################################################################
 # 定数
@@ -23,6 +25,9 @@ FACE_DETECTIION_PAUSE_LONG = 100    # 顔検出成功時の一時停止周期[30
 FACE_DETECTIION_PAUSE_SHORT = 30    # 顔検出失敗時の一時停止周期[30msec*30=900msec]
 BODY_TEMP_STANDARD = 36.2           # 体温の基準値[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
+TRIG = 27
+ECHO = 22
+DISTANCE_STANDARD = 60.0            # 体温測定対象者までの距離(基準値)
 
 # 周期処理状態
 class CycleProcState(Enum):
@@ -55,7 +60,9 @@ class Application(ttk.Frame):
         self.standard_diff = 0.0
         # 周期処理状態
         self.cycle_proc_state = CycleProcState.WAIT_DETECT
-        
+        # 体温測定対象者までの距離
+        self.distance = [DISTANCE_STANDARD, DISTANCE_STANDARD]
+
         self.pack()
         # ウィンドウをスクリーンの中央に配置
         self.setting_window(master)
@@ -77,7 +84,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def setting_window(self, master):
         w = 500                             # ウィンドウの横幅
-        h = 780                             # ウィンドウの高さ
+        h = 800                             # ウィンドウの高さ
         sw = master.winfo_screenwidth()     # スクリーンの横幅
         sh = master.winfo_screenheight()    # スクリーンの高さ
         # ウィンドウをスクリーンの中央に配置
@@ -120,6 +127,8 @@ class Application(ttk.Frame):
         self.label_offset_tmp.grid(row=4, sticky='NW')
         self.label_standard_diff = ttk.Label(frame_lower)
         self.label_standard_diff.grid(row=5, sticky='NW')
+        self.label_distance = ttk.Label(frame_lower)
+        self.label_distance.grid(row=6, sticky='NW')
 
         self.init_param_widgets()
 
@@ -137,6 +146,7 @@ class Application(ttk.Frame):
         self.label_env_tmp.config(text='サーミスタ温度：--.-- ℃')
         self.label_offset_tmp.config(text='オフセット値：--.-- ℃')
         self.label_standard_diff.config(text='基準体温との差分：--.-- ℃')
+        self.label_distance.config(text='体温測定対象者までの距離：--- cm')
     
     ##########################################################################
     # 計測データ ウィジット 表示更新
@@ -155,6 +165,9 @@ class Application(ttk.Frame):
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
         self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
+        self.label_distance.config(text='体温測定対象者までの距離：' +
+                                   str(self.distance[0]) + ' cm' +
+                                   str(self.distance[1]) + ' cm')
         # CSV出力
         self.csv_output()
 
@@ -166,6 +179,8 @@ class Application(ttk.Frame):
         self.init_camera()
         # サーマルセンサ(AMG8833)
         self.init_thermal_sensor()
+        # 超音波センサ(HC-SR04)
+        self.init_ultra_sonic_sensor()
 
     ##########################################################################
     # カメラ　初期化
@@ -190,6 +205,16 @@ class Application(ttk.Frame):
         self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
         # センサの初期化待ち
         time.sleep(.1)
+
+    ##########################################################################
+    # 超音波センサ(HC-SR04) 初期化
+    ##########################################################################
+    def init_ultra_sonic_sensor(self):
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(TRIG, GPIO.OUT)
+        GPIO.setup(ECHO, GPIO.IN)
+        GPIO.output(TRIG, GPIO.LOW)
 
     ##########################################################################
     # CSV出力の初期設定
@@ -288,6 +313,12 @@ class Application(ttk.Frame):
                 elif self.the_world_timer == 1:
                     # サーマルセンサ(AMG8833) サーミスタ 温度取得
                     self.thermal_get_thermistor()
+                elif self.the_world_timer == 2:
+                    # 超音波センサ(HC-SR04) 距離取得(1回目)
+                    self.get_distance(0)
+                elif self.the_world_timer == 3:
+                    # 超音波センサ(HC-SR04) 距離取得(2回目)
+                    self.get_distance(1)
                 elif self.the_world_timer < 10:
                     pass
                 elif self.the_world_timer == 10:
@@ -384,6 +415,25 @@ class Application(ttk.Frame):
         self.offset_temp = round((0.8424 * self.thermistor_temp - 3.2523), 2)
         # 体温
         self.body_temp = round((self.sensor_temp_ave + self.offset_temp), 1)
+
+    ##########################################################################
+    # 超音波センサ(HC-SR04) 距離取得
+    ##########################################################################
+    def get_distance(self, index):
+        # Trig端子を10us以上High
+        GPIO.output(TRIG, GPIO.HIGH)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, GPIO.LOW)
+        # EchoパルスがHighになる時間
+        while GPIO.input(ECHO) == 0:
+            echo_on = time.time()
+        # EchoパルスがLowになる時間
+        while GPIO.input(ECHO) == 1:
+            echo_off = time.time()
+        # Echoパルスのパルス幅(us)
+        echo_pulse_width = (echo_off - echo_on) * 1000000
+        # 距離を算出:Distance in cm = echo pulse width in uS/58
+        self.distance[index] = round(echo_pulse_width / 58)       
 
 if __name__ == '__main__':
     root = Tk()
