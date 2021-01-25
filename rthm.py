@@ -23,17 +23,18 @@ I2C_ADR = 0x68                      # I2C アドレス
 PROC_CYCLE = 30                     # 処理周期[msec]
 FACE_DETECTIION_PAUSE_LONG = 100    # 顔検出成功時の一時停止周期[30msec*100=3000msec]
 FACE_DETECTIION_PAUSE_SHORT = 30    # 顔検出失敗時の一時停止周期[30msec*30=900msec]
+TRIG = 27                           # 超音波センサ(HC-SR04)端子番号 TRIG
+ECHO = 22                           # 超音波センサ(HC-SR04)端子番号 ECHO
+DISTANCE_STANDARD = 60.0            # 体温測定対象者までの距離(基準値)
 BODY_TEMP_STANDARD = 36.2           # 体温の基準値[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
-TRIG = 27
-ECHO = 22
-DISTANCE_STANDARD = 60.0            # 体温測定対象者までの距離(基準値)
 
 # 周期処理状態
 class CycleProcState(Enum):
-    WAIT_DETECT = 0                 # 顔認識待ち
-    PAUSE_SHORT = 1                 # 一時停止(ショート)
-    PUASE_LONG = 2                  # 一時停止(ロング)
+    DETECT_FACE = 0                 # 顔認識処理中
+    MEASURE_DISTANCE = 1            # 体温測定対象者までの距離計測中
+    MEASURE_BODY_TEMP = 2           # 体温計測中
+    ERROR = 3                       # エラー処理中
     
 ##############################################################################
 # クラス：Application
@@ -42,10 +43,14 @@ class Application(ttk.Frame):
     def __init__(self, master=None):
         ttk.Frame.__init__(self, master)
 
+        # 周期処理状態
+        self.cycle_proc_state = CycleProcState.DETECT_FACE
         # 顔検出時の一時停止タイマ
         self.pause_timer = 0
         # 一時停止中の経過時間
         self.the_world_timer = 0
+        # 体温測定対象者までの距離
+        self.distance = DISTANCE_STANDARD
         # 検出温度
         self.sensor_temp = [BODY_TEMP_STANDARD, BODY_TEMP_STANDARD]
         # 検出温度(平均値)
@@ -58,10 +63,6 @@ class Application(ttk.Frame):
         self.offset_temp = 0.0
         # 基準体温との差分
         self.standard_diff = 0.0
-        # 周期処理状態
-        self.cycle_proc_state = CycleProcState.WAIT_DETECT
-        # 体温測定対象者までの距離
-        self.distance = [DISTANCE_STANDARD, DISTANCE_STANDARD]
 
         self.pack()
         # ウィンドウをスクリーンの中央に配置
@@ -165,9 +166,7 @@ class Application(ttk.Frame):
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
         self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
-        self.label_distance.config(text='体温測定対象者までの距離：' +
-                                   str(self.distance[0]) + ' cm' +
-                                   str(self.distance[1]) + ' cm')
+        self.label_distance.config(text='体温測定対象者までの距離：' + str(self.distance) + ' cm ')
         # CSV出力
         self.csv_output()
 
@@ -177,10 +176,10 @@ class Application(ttk.Frame):
     def init_device(self):   
         # カメラ
         self.init_camera()
-        # サーマルセンサ(AMG8833)
-        self.init_thermal_sensor()
         # 超音波センサ(HC-SR04)
         self.init_ultra_sonic_sensor()
+        # サーマルセンサ(AMG8833)
+        self.init_thermal_sensor()
 
     ##########################################################################
     # カメラ　初期化
@@ -196,6 +195,16 @@ class Application(ttk.Frame):
         self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
 
     ##########################################################################
+    # 超音波センサ(HC-SR04) 初期化
+    ##########################################################################
+    def init_ultra_sonic_sensor(self):
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(TRIG, GPIO.OUT)
+        GPIO.setup(ECHO, GPIO.IN)
+        GPIO.output(TRIG, GPIO.LOW)
+
+    ##########################################################################
     # サーマルセンサ(AMG8833) 初期化
     ##########################################################################
     def init_thermal_sensor(self):   
@@ -205,16 +214,6 @@ class Application(ttk.Frame):
         self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
         # センサの初期化待ち
         time.sleep(.1)
-
-    ##########################################################################
-    # 超音波センサ(HC-SR04) 初期化
-    ##########################################################################
-    def init_ultra_sonic_sensor(self):
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(TRIG, GPIO.OUT)
-        GPIO.setup(ECHO, GPIO.IN)
-        GPIO.output(TRIG, GPIO.LOW)
 
     ##########################################################################
     # CSV出力の初期設定
@@ -252,40 +251,51 @@ class Application(ttk.Frame):
     ##########################################################################
     def cycle_proc(self):
         # 顔認識待ち
-        if self.cycle_proc_state == CycleProcState.WAIT_DETECT:
+        if self.cycle_proc_state == CycleProcState.DETECT_FACE:
             # 停止画取得
             self.camera_get_frame()
             # 顔認識処理
             facerect = self.camera_detect_face()
             # 認識した顔が一つの場合
             if len(facerect) == 1:
-                # print(facerect[0][2])
-                if facerect[0][2] < 320:
-                    self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
-                    self.cycle_proc_state = CycleProcState.PAUSE_SHORT
-                    self.label_msg.config(text='もう少し近づいてください')
-                elif facerect[0][2] > 390:
-                    self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
-                    self.cycle_proc_state = CycleProcState.PAUSE_SHORT
-                    self.label_msg.config(text='もう少し離れてください')
-                else:
-                    self.pause_timer = FACE_DETECTIION_PAUSE_LONG
-                    self.the_world_timer = 0
-                    self.cycle_proc_state = CycleProcState.PUASE_LONG
+                self.cycle_proc_state = CycleProcState.MEASURE_DISTANCE
+                self.label_msg.config(text='')
             # 認識した顔が複数の場合
             elif len(facerect) > 1:
                 self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
-                self.cycle_proc_state = CycleProcState.PAUSE_SHORT
+                self.cycle_proc_state = CycleProcState.ERROR
                 self.label_msg.config(text='体温計測は一人ずつです')
             # 顔認識をしなかった場合
             else:
-                self.pause_timer = 0
-                self.cycle_proc_state = CycleProcState.WAIT_DETECT
+                self.cycle_proc_state = CycleProcState.DETECT_FACE
         
-        # 一時停止(ショート)
-        elif self.cycle_proc_state == CycleProcState.PAUSE_SHORT:
+        # 体温測定対象者までの距離計測中
+        elif self.cycle_proc_state == CycleProcState.MEASURE_DISTANCE:
+            # 超音波センサ(HC-SR04) 距離取得
+            self.distance = self.get_distance()
+            self.label_distance.config(text='体温測定対象者までの距離：' + str(self.distance) + ' cm ')
+
+            if self.distance  <= 0.0:
+                self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
+                self.cycle_proc_state = CycleProcState.ERROR
+                self.label_msg.config(text='距離測定に失敗しました')
+            elif self.distance  > 60.0:
+                self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
+                self.cycle_proc_state = CycleProcState.ERROR
+                self.label_msg.config(text='もう少し近づいてください')
+            elif self.distance  < 30.0:
+                self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
+                self.cycle_proc_state = CycleProcState.ERROR
+                self.label_msg.config(text='もう少し離れてください')
+            else:
+                self.pause_timer = FACE_DETECTIION_PAUSE_LONG
+                self.the_world_timer = 0
+                self.cycle_proc_state = CycleProcState.MEASURE_BODY_TEMP
+
+        # エラー処理中
+        elif self.cycle_proc_state == CycleProcState.ERROR:
             if self.pause_timer == 0:
-                self.cycle_proc_state = CycleProcState.WAIT_DETECT
+                self.cycle_proc_state = CycleProcState.DETECT_FACE
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
             elif self.pause_timer < 10:
@@ -295,10 +305,10 @@ class Application(ttk.Frame):
             else:
                 self.pause_timer -= 1
 
-        # 一時停止(ロング)
-        elif self.cycle_proc_state == CycleProcState.PUASE_LONG:
+        # 体温計測中
+        elif self.cycle_proc_state == CycleProcState.MEASURE_BODY_TEMP:
             if self.pause_timer == 0:
-                self.cycle_proc_state = CycleProcState.WAIT_DETECT
+                self.cycle_proc_state = CycleProcState.DETECT_FACE
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
             elif self.pause_timer < 10:
@@ -309,21 +319,15 @@ class Application(ttk.Frame):
                 # ザ・ワールド !!!!
                 if self.the_world_timer == 0:
                     # サーマルセンサ(AMG8833) 赤外線アレイセンサ 温度取得(1回目)
-                    self.thermal_get_temperature(0)
+                    self.sensor_temp[0] = self.thermal_get_temperature()
                 elif self.the_world_timer == 1:
                     # サーマルセンサ(AMG8833) サーミスタ 温度取得
-                    self.thermal_get_thermistor()
-                elif self.the_world_timer == 2:
-                    # 超音波センサ(HC-SR04) 距離取得(1回目)
-                    self.get_distance(0)
-                elif self.the_world_timer == 3:
-                    # 超音波センサ(HC-SR04) 距離取得(2回目)
-                    self.get_distance(1)
+                    self.thermistor_temp = self.thermal_get_thermistor()
                 elif self.the_world_timer < 10:
                     pass
                 elif self.the_world_timer == 10:
                     # サーマルセンサ(AMG8833) 赤外線アレイセンサ 温度取得(2回目)
-                    self.thermal_get_temperature(1)
+                    self.sensor_temp[1] = self.thermal_get_temperature()
                 elif self.the_world_timer == 11:
                     # サーマルセンサ(AMG8833) 体温の算出
                     self.thermal_make_body_temp()
@@ -340,7 +344,7 @@ class Application(ttk.Frame):
         else:
             print('[error] cycle_proc')
             self.pause_timer = 0
-            self.cycle_proc_state = CycleProcState.WAIT_DETECT
+            self.cycle_proc_state = CycleProcState.DETECT_FACE
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
@@ -384,24 +388,41 @@ class Application(ttk.Frame):
         return facerect
 
     ##########################################################################
+    # 超音波センサ(HC-SR04) 距離取得
+    ##########################################################################
+    def get_distance(self):
+        # Trig端子を10us以上High
+        GPIO.output(TRIG, GPIO.HIGH)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, GPIO.LOW)
+        # EchoパルスがHighになる時間
+        while GPIO.input(ECHO) == 0:
+            echo_on = time.time()
+        # EchoパルスがLowになる時間
+        while GPIO.input(ECHO) == 1:
+            echo_off = time.time()
+        # Echoパルスのパルス幅(us)
+        echo_pulse_width = (echo_off - echo_on) * 1000000
+        # 距離を算出:Distance in cm = echo pulse width in uS/58
+        distance = round((echo_pulse_width / 58), 1)
+        if distance > 400.0:
+            distance = 0.0
+
+        return distance
+
+    ##########################################################################
     # サーマルセンサ(AMG8833) サーミスタ 温度取得
     ##########################################################################
     def thermal_get_thermistor(self):
         # サーミスタ温度
-        self.thermistor_temp = round(self.sensor.temperature, 2)     
+        return round(self.sensor.temperature, 2)     
 
     ##########################################################################
     # サーマルセンサ(AMG8833) 赤外線アレイセンサ 温度取得
     ##########################################################################
-    def thermal_get_temperature(self, index):
+    def thermal_get_temperature(self):
         # 検出温度
-        temp = np.array(self.sensor.pixels)
-        # ガイド枠の内側部分で検出した温度のみを採用
-        # temp_select = temp[1:7,1:7]
-        # print(temp)
-        # print(temp_select)
-        # 検出温度(最大値)
-        self.sensor_temp[index] = np.amax(temp)
+        return np.amax(np.array(self.sensor.pixels))
 
     ##########################################################################
     # サーマルセンサ(AMG8833) 体温の算出
@@ -416,26 +437,9 @@ class Application(ttk.Frame):
         # 体温
         self.body_temp = round((self.sensor_temp_ave + self.offset_temp), 1)
 
-    ##########################################################################
-    # 超音波センサ(HC-SR04) 距離取得
-    ##########################################################################
-    def get_distance(self, index):
-        # Trig端子を10us以上High
-        GPIO.output(TRIG, GPIO.HIGH)
-        time.sleep(0.00001)
-        GPIO.output(TRIG, GPIO.LOW)
-        # EchoパルスがHighになる時間
-        while GPIO.input(ECHO) == 0:
-            echo_on = time.time()
-        # EchoパルスがLowになる時間
-        while GPIO.input(ECHO) == 1:
-            echo_off = time.time()
-        # Echoパルスのパルス幅(us)
-        echo_pulse_width = (echo_off - echo_on) * 1000000
-        # 距離を算出:Distance in cm = echo pulse width in uS/58
-        self.distance[index] = round(echo_pulse_width / 58)       
-
 if __name__ == '__main__':
     root = Tk()
     app = Application(master=root)
     app.mainloop()
+    # 終了処理
+    GPIO.cleanup()
