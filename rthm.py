@@ -124,10 +124,10 @@ class Application(ttk.Frame):
         self.label_sns_tmp_ave.grid(row=2, sticky='NW')
         self.label_env_tmp = ttk.Label(frame_lower)
         self.label_env_tmp.grid(row=3, sticky='NW')
-        self.label_offset_tmp = ttk.Label(frame_lower)
-        self.label_offset_tmp.grid(row=4, sticky='NW')
-        self.label_standard_diff = ttk.Label(frame_lower)
-        self.label_standard_diff.grid(row=5, sticky='NW')
+        self.label_corr_thermistor = ttk.Label(frame_lower)
+        self.label_corr_thermistor.grid(row=4, sticky='NW')
+        self.label_corr_distance = ttk.Label(frame_lower)
+        self.label_corr_distance.grid(row=5, sticky='NW')
         self.label_distance = ttk.Label(frame_lower)
         self.label_distance.grid(row=6, sticky='NW')
 
@@ -145,8 +145,8 @@ class Application(ttk.Frame):
         self.label_sns_tmp2.config(text='検出温度(2回目)：--.-- ℃')
         self.label_sns_tmp_ave.config(text='検出温度(平均値)：--.-- ℃')
         self.label_env_tmp.config(text='サーミスタ温度：--.-- ℃')
-        self.label_offset_tmp.config(text='オフセット値：--.-- ℃')
-        self.label_standard_diff.config(text='基準体温との差分：--.-- ℃')
+        self.label_corr_thermistor.config(text='サーミスタ温度補正：--.-- ℃')
+        self.label_corr_distance.config(text='距離補正：--.-- ℃')
         self.label_distance.config(text='体温測定対象者までの距離：--- cm')
     
     ##########################################################################
@@ -154,7 +154,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def update_param_widgets(self):
         # フレーム(上部)
-        if self.body_temp >= 38.0:
+        if self.body_temp > 38.0:
             self.label_msg.config(text='体温が高いです！検温してください')
         else:
             self.label_msg.config(text='体温は正常です！問題ありません')
@@ -164,8 +164,8 @@ class Application(ttk.Frame):
         self.label_sns_tmp2.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
         self.label_sns_tmp_ave.config(text='検出温度(平均値)：' + str(self.sensor_temp_ave) + ' ℃')
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
-        self.label_offset_tmp.config(text='オフセット値：' + str(self.offset_temp) + ' ℃')
-        self.label_standard_diff.config(text='基準体温との差分：' + str(self.standard_diff) + ' ℃')
+        self.label_corr_thermistor.config(text='サーミスタ温度補正：' + str(self.corr_thermistor) + ' ℃')
+        self.label_corr_distance.config(text='距離補正：' + str(self.corr_distance) + ' ℃')
         self.label_distance.config(text='体温測定対象者までの距離：' + str(self.distance) + ' cm ')
         # CSV出力
         self.csv_output()
@@ -231,7 +231,7 @@ class Application(ttk.Frame):
             file = csv.writer(csvfile)
             # 1行目：見出し
             file.writerow(['検出温度(1回目)','検出温度(2回目)','検出温度(平均値)',
-                           'サーミスタ温度','オフセット値','基準体温との差分','体温'])
+                           'サーミスタ温度','サーミスタ温度補正','距離補正','体温'])
 
     ##########################################################################
     # CSV出力
@@ -241,8 +241,8 @@ class Application(ttk.Frame):
         with open(self.filename, 'a', newline='') as csvfile:
             file = csv.writer(csvfile)
             # csvファイルへの書き込みデータ
-            data = [self.sensor_temp[0],self.sensor_temp[1],self.sensor_temp_ave,
-                    self.thermistor_temp,self.offset_temp,self.standard_diff,self.body_temp]
+            data = [self.sensor_temp[0], self.sensor_temp[1], self.sensor_temp_ave,
+                    self.thermistor_temp, self.corr_thermistor, self.corr_distance, self.body_temp]
             # データの書き込み
             file.writerow(data)
 
@@ -279,7 +279,7 @@ class Application(ttk.Frame):
                 self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
                 self.cycle_proc_state = CycleProcState.ERROR
                 self.label_msg.config(text='距離測定に失敗しました')
-            elif self.distance  > 60.0:
+            elif self.distance  > DISTANCE_STANDARD:
                 self.pause_timer = FACE_DETECTIION_PAUSE_SHORT
                 self.cycle_proc_state = CycleProcState.ERROR
                 self.label_msg.config(text='もう少し近づいてください')
@@ -430,13 +430,13 @@ class Application(ttk.Frame):
     def thermal_make_body_temp(self):
         # 検出温度　平均値
         self.sensor_temp_ave = round((self.sensor_temp[0] + self.sensor_temp[1]) / 2, 2)
-        # 基準体温との差分
-        self.standard_diff = round((BODY_TEMP_STANDARD - self.sensor_temp_ave), 2)
         # サーミスタ温度補正
-        self.offset_temp = round((0.8424 * self.thermistor_temp - 3.2523), 2)
+        self.corr_thermistor = 0.8424 * self.thermistor_temp - 3.2523
+        # 距離補正
+        self.corr_distance = (DISTANCE_STANDARD - self.distance) * 0.064
         # 体温
-        self.body_temp = round((self.sensor_temp_ave + self.offset_temp), 1)
-
+        self.body_temp = round((self.sensor_temp_ave + self.corr_thermistor - self.corr_distance), 1)
+       
 if __name__ == '__main__':
     root = Tk()
     app = Application(master=root)
