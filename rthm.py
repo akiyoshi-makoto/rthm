@@ -40,8 +40,9 @@ class CycleProcState(Enum):
     GET_TEMPERATURE_2 = 6           # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得(2回目)
     MAKE_BODY_TEMP_2 = 7            # 体温演算(2回目)
     UPDATE_WIDGETS = 8              # 表示更新処理
-    PAUSE = 9                       # 一時停止処理
-    ERROR = 10                      # エラー処理
+    UPDATE_CSV = 9                  # CSV更新処理
+    PAUSE = 10                      # 一時停止処理
+    ERROR = 11                      # エラー処理
     
 ##############################################################################
 # クラス：Application
@@ -151,16 +152,32 @@ class Application(ttk.Frame):
         self.label_body_tmp.config(text='体温：--.-- ℃')
         # フレーム(下部)
         self.label_sns_tmp1.config(text='検出温度(1回目)：--.-- ℃')
-        self.label_sns_tmp1.config(text='検出温度(2回目)：--.-- ℃')
+        self.label_sns_tmp2.config(text='検出温度(2回目)：--.-- ℃')
         self.label_env_tmp.config(text='サーミスタ温度：--.-- ℃')
         self.label_corr_thermistor.config(text='サーミスタ温度補正：--.-- ℃')
-        self.label_distance2.config(text='距離(1回目)：--- cm')
+        self.label_distance1.config(text='距離(1回目)：--- cm')
         self.label_distance2.config(text='距離(2回目)：--- cm')
     
     ##########################################################################
     # 計測データ ウィジット 表示更新
     ##########################################################################
     def update_param_widgets(self):
+        # if self.distance[index] > 400.0:
+        #     self.pause_timer = 0
+        #     self.cycle_proc_state = CycleProcState.ERROR
+        #     self.label_msg.config(text='距離測定に失敗しました')
+        # elif self.distance[index]  > DISTANCE_STANDARD:
+        #     self.pause_timer = 0
+        #     self.cycle_proc_state = CycleProcState.ERROR
+        #     self.label_msg.config(text='もう少し近づいてください')
+            
+        # elif self.distance[index]  < 30.0:
+        #     self.pause_timer = 0
+        #     self.cycle_proc_state = CycleProcState.ERROR
+        #     self.label_msg.config(text='もう少し離れてください')
+        # else:
+        #     pass
+        
         # 体温(平均値)
         self.body_temp_ave = round((self.body_temp[0] + self.body_temp[1]) / 2, 2)
         # フレーム(上部)
@@ -171,16 +188,13 @@ class Application(ttk.Frame):
         self.label_body_tmp.config(text='体温：' + str(self.body_temp_ave) + ' ℃')
         # フレーム(下部)
         self.label_sns_tmp1.config(text='検出温度(1回目)：' + str(self.sensor_temp[0]) + ' ℃')
-        self.label_sns_tmp1.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
+        self.label_sns_tmp2.config(text='検出温度(2回目)：' + str(self.sensor_temp[1]) + ' ℃')
         self.label_env_tmp.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
         self.label_corr_thermistor.config(text='サーミスタ温度補正：' + str(self.corr_thermistor) + ' ℃')
-        self.label_distance2.config(text='距離(1回目)：' + str(self.distance[0]) + ' cm ')
+        self.label_distance1.config(text='距離(1回目)：' + str(self.distance[0]) + ' cm ')
         self.label_distance2.config(text='距離(2回目)：' + str(self.distance[1]) + ' cm ')
-        # CSV出力
-        self.csv_output()
-
-        self.pause_timer = 0
-        self.cycle_proc_state = CycleProcState.PAUSE
+ 
+        self.cycle_proc_state = CycleProcState.UPDATE_CSV
 
     ##########################################################################
     # カメラ　初期化
@@ -248,7 +262,7 @@ class Application(ttk.Frame):
             file = csv.writer(csvfile)
             # 1行目：見出し
             file.writerow(['検出温度(1回目)','検出温度(2回目)','サーミスタ温度','サーミスタ温度補正',
-                           '距離(1回目)','距離(1回目)','体温'])
+                           '距離(1回目)','距離(2回目)','体温'])
 
     ##########################################################################
     # CSV出力
@@ -262,7 +276,10 @@ class Application(ttk.Frame):
                     self.distance[0], self.distance[1], self.body_temp_ave]
             # データの書き込み
             file.writerow(data)
-
+        
+        self.pause_timer = 0
+        self.cycle_proc_state = CycleProcState.PAUSE
+    
     ##########################################################################
     # 周期処理
     ##########################################################################
@@ -305,6 +322,10 @@ class Application(ttk.Frame):
         # 表示更新処理
         elif self.cycle_proc_state == CycleProcState.UPDATE_WIDGETS:
             self.update_param_widgets()
+
+        # CSV更新処理
+        elif self.cycle_proc_state == CycleProcState.UPDATE_CSV:
+            self.csv_output()
 
         # 一時停止処理
         elif self.cycle_proc_state == CycleProcState.PAUSE:
@@ -393,34 +414,13 @@ class Application(ttk.Frame):
         self.distance[index] = round((echo_pulse_width / 58), 1)
 
         if index == 0:
-            self.label_distance1.config(text='距離(1回目)：' + str(self.distance[0]) + ' cm ')
+            self.cycle_proc_state = CycleProcState.GET_TEMPERATURE_1
         elif index == 1:
-            self.label_distance2.config(text='距離(2回目)：' + str(self.distance[1]) + ' cm ')
+            self.cycle_proc_state = CycleProcState.GET_TEMPERATURE_2
         else:
             print('[error] index error')
             self.pause_timer = 0
             self.cycle_proc_state = CycleProcState.ERROR
-
-        if self.distance[index] > 400.0:
-            self.pause_timer = 0
-            self.cycle_proc_state = CycleProcState.ERROR
-            self.label_msg.config(text='距離測定に失敗しました')
-        elif self.distance[index]  > DISTANCE_STANDARD:
-            self.pause_timer = 0
-            self.cycle_proc_state = CycleProcState.ERROR
-            self.label_msg.config(text='もう少し近づいてください')
-            
-        elif self.distance[index]  < 30.0:
-            self.pause_timer = 0
-            self.cycle_proc_state = CycleProcState.ERROR
-            self.label_msg.config(text='もう少し離れてください')
-        else:
-            if index == 0:
-                self.cycle_proc_state = CycleProcState.GET_TEMPERATURE_1
-            elif index == 1:
-                self.cycle_proc_state = CycleProcState.GET_TEMPERATURE_2
-            else:
-                pass
 
     ##########################################################################
     # サーマルセンサ(AMG8833) サーミスタ 温度取得
@@ -444,7 +444,7 @@ class Application(ttk.Frame):
         else:
             print('[error] index error')
             self.pause_timer = 0
-            self.cycle_proc_state = CycleProcState.ERROR            
+            self.cycle_proc_state = CycleProcState.ERROR
 
     ##########################################################################
     # サーマルセンサ(AMG8833) 体温の算出
