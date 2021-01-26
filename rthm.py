@@ -69,16 +69,22 @@ class Application(ttk.Frame):
         self.setting_window(master)
         # ウィジットを生成
         self.create_widgets()
-        # デバイスの初期化
-        self.init_device()
+        # カメラ
+        self.init_camera()
+        # 超音波センサ(HC-SR04)
+        ret_init_ultra_sonic_sensor = self.init_ultra_sonic_sensor()
+        # サーマルセンサ(AMG8833)
+        self.init_thermal_sensor()
         # CSV出力の初期設定
         self.init_csv()
         
-        if self.camera.isOpened():
+        if not self.camera.isOpened:
+            messagebox.showerror('カメラ認識エラー', 'カメラの接続を確認してください')
+        elif not ret_init_ultra_sonic_sensor:
+            messagebox.showerror('超音波センサエラー', '超音波センサの接続を確認してください')
+        else:
             # 周期処理
             self.cycle_proc()
-        else:
-            messagebox.showerror('カメラ認識エラー', 'カメラの接続を確認してください')
 
     ##########################################################################
     # ウィンドウをスクリーンの中央に配置
@@ -171,17 +177,6 @@ class Application(ttk.Frame):
         self.csv_output()
 
     ##########################################################################
-    # デバイスの初期化
-    ##########################################################################
-    def init_device(self):   
-        # カメラ
-        self.init_camera()
-        # 超音波センサ(HC-SR04)
-        self.init_ultra_sonic_sensor()
-        # サーマルセンサ(AMG8833)
-        self.init_thermal_sensor()
-
-    ##########################################################################
     # カメラ　初期化
     ##########################################################################
     def init_camera(self):   
@@ -204,6 +199,22 @@ class Application(ttk.Frame):
         GPIO.setup(ECHO, GPIO.IN)
         GPIO.output(TRIG, GPIO.LOW)
 
+        # Trig端子を10us以上High
+        GPIO.output(TRIG, GPIO.HIGH)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, GPIO.LOW)
+        
+        time1 = time.time()
+        result = True
+        # EchoパルスがHighになる時間
+        while GPIO.input(ECHO) == 0:
+            time2 = time.time()
+            time_chk = time2 - time1
+            if time_chk > 0.001:
+                result = False
+                break
+        return result
+            
     ##########################################################################
     # サーマルセンサ(AMG8833) 初期化
     ##########################################################################
@@ -403,6 +414,7 @@ class Application(ttk.Frame):
             echo_off = time.time()
         # Echoパルスのパルス幅(us)
         echo_pulse_width = (echo_off - echo_on) * 1000000
+        # print(echo_pulse_width)
         # 距離を算出:Distance in cm = echo pulse width in uS/58
         distance = round((echo_pulse_width / 58), 1)
         if distance > 400.0:
