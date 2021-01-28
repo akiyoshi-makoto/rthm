@@ -73,15 +73,15 @@ class Application(ttk.Frame):
         # カメラ
         self.camera_init()
         # 超音波センサ(HC-SR04)
-        ret_init_ultra_sonic_sensor = self.init_ultra_sonic_sensor()
+        ret_sonic_sensor = self.sonic_sensor_init()
         # サーマルセンサ(AMG8833)
-        self.init_thermal_sensor()
+        self.thermal_sensor_init()
         # CSV出力の初期設定
-        self.init_csv()
+        self.csv_init()
         
         if not self.camera.isOpened:
             messagebox.showerror('カメラ認識エラー', 'カメラの接続を確認してください')
-        elif not ret_init_ultra_sonic_sensor:
+        elif not ret_sonic_sensor:
             messagebox.showerror('超音波センサエラー', '超音波センサの接続を確認してください')
         else:
             # 周期処理
@@ -210,7 +210,7 @@ class Application(ttk.Frame):
     ##########################################################################
     # 超音波センサ(HC-SR04) 初期化
     ##########################################################################
-    def init_ultra_sonic_sensor(self):
+    def sonic_sensor_init(self):
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(TRIG, GPIO.OUT)
@@ -232,11 +232,33 @@ class Application(ttk.Frame):
                 result = False
                 break
         return result
-            
+
+    ##########################################################################
+    # 超音波センサ(HC-SR04) 距離取得
+    ##########################################################################
+    def sonic_sensor_ctrl(self):
+        # Trig端子を10us以上High
+        GPIO.output(TRIG, GPIO.HIGH)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, GPIO.LOW)
+        # EchoパルスがHighになる時間
+        while GPIO.input(ECHO) == 0:
+            echo_on = time.time()
+        # EchoパルスがLowになる時間
+        while GPIO.input(ECHO) == 1:
+            echo_off = time.time()
+        # Echoパルスのパルス幅(us)
+        echo_pulse_width = (echo_off - echo_on) * 1000000
+        # print(echo_pulse_width)
+        # 距離を算出:Distance in cm = echo pulse width in uS/58
+        distance = round((echo_pulse_width / 58), 1)
+
+        return distance
+
     ##########################################################################
     # サーマルセンサ(AMG8833) 初期化
     ##########################################################################
-    def init_thermal_sensor(self):   
+    def thermal_sensor_init(self):   
         # I2Cバスの初期化
         i2c_bus = busio.I2C(board.SCL, board.SDA)
         # センサの初期化
@@ -247,7 +269,7 @@ class Application(ttk.Frame):
     ##########################################################################
     # CSV出力の初期設定
     ##########################################################################
-    def init_csv(self):
+    def csv_init(self):
         # フォルダの存在チェック
         if not os.path.isdir(LOG_PATH):
             os.makedirs(LOG_PATH)
@@ -270,7 +292,7 @@ class Application(ttk.Frame):
     ##########################################################################
     # CSV出力
     ##########################################################################
-    def csv_output(self):
+    def csv_ctrl(self):
         # csvファイルの生成
         with open(self.filename, 'a', newline='') as csvfile:
             file = csv.writer(csvfile)
@@ -308,7 +330,7 @@ class Application(ttk.Frame):
 
         # 体温測定対象者までの距離計測(1回目)
         elif self.cycle_proc_state == CycleProcState.DISTANCE_1:            
-            self.get_distance()
+            self.distance[0] = self.sonic_sensor_ctrl()
             self.cycle_proc_state = CycleProcState.THERMISTOR
 
         # サーマルセンサ(AMG8833) サーミスタ 温度取得
@@ -318,7 +340,7 @@ class Application(ttk.Frame):
  
         # 体温測定対象者までの距離計測(2回目)
         elif self.cycle_proc_state == CycleProcState.DISTANCE_2:            
-            self.get_distance()
+            self.distance[1] = self.sonic_sensor_ctrl()
             self.cycle_proc_state = CycleProcState.TEMPERATURE
 
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
@@ -337,7 +359,7 @@ class Application(ttk.Frame):
    
         # CSV更新処理
         elif self.cycle_proc_state == CycleProcState.UPDATE_CSV:
-            self.csv_output()
+            self.csv_ctrl()
             self.pause_timer = 0
             self.cycle_proc_state = CycleProcState.PAUSE
 
@@ -372,31 +394,6 @@ class Application(ttk.Frame):
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
-
-    ##########################################################################
-    # 超音波センサ(HC-SR04) 距離取得
-    ##########################################################################
-    def get_distance(self):
-        # Trig端子を10us以上High
-        GPIO.output(TRIG, GPIO.HIGH)
-        time.sleep(0.00001)
-        GPIO.output(TRIG, GPIO.LOW)
-        # EchoパルスがHighになる時間
-        while GPIO.input(ECHO) == 0:
-            echo_on = time.time()
-        # EchoパルスがLowになる時間
-        while GPIO.input(ECHO) == 1:
-            echo_off = time.time()
-        # Echoパルスのパルス幅(us)
-        echo_pulse_width = (echo_off - echo_on) * 1000000
-        # print(echo_pulse_width)
-        # 距離を算出:Distance in cm = echo pulse width in uS/58
-        distance = round((echo_pulse_width / 58), 1)
-
-        if self.cycle_proc_state == CycleProcState.DISTANCE_1:
-            self.distance[0] = distance
-        else:
-            self.distance[1] = distance    
 
     ##########################################################################
     # サーマルセンサ(AMG8833) サーミスタ 温度取得
