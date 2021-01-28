@@ -48,6 +48,10 @@ class Application(ttk.Frame):
     def __init__(self, master=None):
         ttk.Frame.__init__(self, master)
 
+        self.pack()
+        # ウィンドウをスクリーンの中央に配置
+        self.setting_window(master)
+
         # 周期処理状態
         self.cycle_proc_state = CycleProcState.DETECT_FACE
         # 一時停止タイマ
@@ -65,13 +69,10 @@ class Application(ttk.Frame):
         # 体温
         self.body_temp = BODY_TEMP_STANDARD
 
-        self.pack()
-        # ウィンドウをスクリーンの中央に配置
-        self.setting_window(master)
         # ウィジットを生成
         self.create_widgets()
         # カメラ
-        self.init_camera()
+        self.camera_init()
         # 超音波センサ(HC-SR04)
         ret_init_ultra_sonic_sensor = self.init_ultra_sonic_sensor()
         # サーマルセンサ(AMG8833)
@@ -156,7 +157,7 @@ class Application(ttk.Frame):
     ##########################################################################
     # カメラ　初期化
     ##########################################################################
-    def init_camera(self):   
+    def camera_init(self):   
         self.camera = cv2.VideoCapture(0)
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)
         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -165,6 +166,45 @@ class Application(ttk.Frame):
 
         # 顔検出のための学習元データを読み込む
         self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
+
+    ##########################################################################
+    # 停止画取得
+    ##########################################################################
+    def camera_get_frame(self):
+        # 停止画を取得
+        ret, self.frame = self.camera.read()
+    
+    ##########################################################################
+    # 顔認識処理
+    ##########################################################################
+    def camera_detect_face(self):
+        # 左右反転
+        frame_mirror = cv2.flip(self.frame, 1)
+        # OpenCV(BGR) -> Pillow(RGB)変換
+        frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
+        # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
+        frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
+        # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
+        facerect = self.face_cascade.detectMultiScale(frame_gray,
+                                                      scaleFactor=1.2,
+                                                      minNeighbors=2,
+                                                      minSize=(150, 150))
+        # 検出した場所すべてに緑色で枠を描画する
+        for rect in facerect:
+            cv2.rectangle(frame_color,
+                            tuple(rect[0:2]),
+                            tuple(rect[0:2]+rect[2:4]),
+                            (0, 255, 0),
+                            thickness=3)
+
+        # ガイド枠の描画
+        cv2.rectangle(frame_color, (60,60), (420,420), (0,0,255), thickness=3)
+        # OpenCV frame -> Pillow Photo
+        self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
+        # Pillow Photo -> Canvas
+        self.canvas_camera.create_image(0, 0, image = self.photo, anchor = 'nw')
+
+        return len(facerect)
 
     ##########################################################################
     # 超音波センサ(HC-SR04) 初期化
@@ -331,45 +371,6 @@ class Application(ttk.Frame):
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
-
-    ##########################################################################
-    # 停止画取得
-    ##########################################################################
-    def camera_get_frame(self):
-        # 停止画を取得
-        ret, self.frame = self.camera.read()
-    
-    ##########################################################################
-    # 顔認識処理
-    ##########################################################################
-    def camera_detect_face(self):
-        # 左右反転
-        frame_mirror = cv2.flip(self.frame, 1)
-        # OpenCV(BGR) -> Pillow(RGB)変換
-        frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
-        # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
-        frame_gray = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
-        # 顔検出を行う(detectMultiScaleの戻り値は(x座標, y座標, 横幅, 縦幅)のリスト)
-        facerect = self.face_cascade.detectMultiScale(frame_gray,
-                                                      scaleFactor=1.2,
-                                                      minNeighbors=2,
-                                                      minSize=(150, 150))
-        # 検出した場所すべてに緑色で枠を描画する
-        for rect in facerect:
-            cv2.rectangle(frame_color,
-                            tuple(rect[0:2]),
-                            tuple(rect[0:2]+rect[2:4]),
-                            (0, 255, 0),
-                            thickness=3)
-
-        # ガイド枠の描画
-        cv2.rectangle(frame_color, (60,60), (420,420), (0,0,255), thickness=3)
-        # OpenCV frame -> Pillow Photo
-        self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
-        # Pillow Photo -> Canvas
-        self.canvas_camera.create_image(0, 0, image = self.photo, anchor = 'nw')
-
-        return len(facerect)
 
     ##########################################################################
     # 超音波センサ(HC-SR04) 距離取得
