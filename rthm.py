@@ -21,8 +21,6 @@ import PIL.Image, PIL.ImageTk
 ##############################################################################
 I2C_ADR = 0x68                      # I2C アドレス
 PROC_CYCLE = 30                     # 処理周期[msec]
-FACE_DETECTIION_PAUSE_LONG = 70     # 顔検出成功時の一時停止周期[30msec*100=3000msec]
-FACE_DETECTIION_PAUSE_SHORT = 35    # 顔検出失敗時の一時停止周期[30msec* 50=1500msec]
 TRIG = 27                           # 超音波センサ(HC-SR04)端子番号 TRIG
 ECHO = 22                           # 超音波センサ(HC-SR04)端子番号 ECHO
 DISTANCE_STANDARD = 60.0            # 体温測定対象者までの距離(基準値)
@@ -31,7 +29,7 @@ LOG_PATH = './log_file/'            # ログファイル保存パス
 
 # 周期処理状態
 class CycleProcState(Enum):
-    DETECT_FACE = 0                 # 顔認識処理
+    FACE_RECOGNITION = 0            # 顔認識処理
     DISTANCE_1 = 1                  # 体温測定対象者までの距離取得(1回目)
     THERMISTOR = 2                  # サーマルセンサ(AMG8833) サーミスタ 温度取得
     DISTANCE_2 = 3                  # 体温測定対象者までの距離取得(2回目)
@@ -40,6 +38,7 @@ class CycleProcState(Enum):
     UPDATE_CSV = 6                  # CSV更新処理
     PAUSE = 7                       # 一時停止処理
     ERROR = 8                       # エラー処理
+    CLEAR_FRAME = 9                 # 停止画の空読み
     
 ##############################################################################
 # クラス：Application
@@ -53,7 +52,7 @@ class Application(ttk.Frame):
         self.setting_window(master)
 
         # 周期処理状態
-        self.cycle_proc_state = CycleProcState.DETECT_FACE
+        self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
         # 一時停止タイマ
         self.pause_timer = 0
         # 体温測定対象者までの距離
@@ -172,14 +171,16 @@ class Application(ttk.Frame):
     ##########################################################################
     def camera_get_frame(self):
         # 停止画を取得
-        ret, self.frame = self.camera.read()
+        ret, frame = self.camera.read()
     
     ##########################################################################
     # 顔認識処理
     ##########################################################################
-    def camera_detect_face(self):
+    def face_recognition(self):
+        # 停止画を取得
+        ret, frame = self.camera.read()
         # 左右反転
-        frame_mirror = cv2.flip(self.frame, 1)
+        frame_mirror = cv2.flip(frame, 1)
         # OpenCV(BGR) -> Pillow(RGB)変換
         frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
         # 顔検出の処理効率化のために、写真の情報量を落とす（モノクロにする）
@@ -289,11 +290,9 @@ class Application(ttk.Frame):
     ##########################################################################
     def cycle_proc(self):
         # 顔認識待ち
-        if self.cycle_proc_state == CycleProcState.DETECT_FACE:
-            # 停止画取得
-            self.camera_get_frame()
+        if self.cycle_proc_state == CycleProcState.FACE_RECOGNITION:
             # 顔認識処理
-            facerect_num = self.camera_detect_face()
+            facerect_num = self.face_recognition()
             # 認識した顔が一つの場合
             if facerect_num == 1:
                 self.cycle_proc_state = CycleProcState.DISTANCE_1
@@ -305,7 +304,7 @@ class Application(ttk.Frame):
                 self.label_msg.config(text='体温計測は一人ずつです')
             # 顔認識をしなかった場合
             else:
-                self.cycle_proc_state = CycleProcState.DETECT_FACE
+                self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
 
         # 体温測定対象者までの距離計測(1回目)
         elif self.cycle_proc_state == CycleProcState.DISTANCE_1:            
@@ -344,30 +343,32 @@ class Application(ttk.Frame):
 
         # 一時停止処理
         elif self.cycle_proc_state == CycleProcState.PAUSE:
-            # 停止画取得
-            self.camera_get_frame()
-            # 一時停止タイマ処理
             self.pause_timer += 1
-            if self.pause_timer > FACE_DETECTIION_PAUSE_LONG:
-                self.cycle_proc_state = CycleProcState.DETECT_FACE
-                # 計測データ ウィジット 初期化
-                self.init_param_widgets()
+            if self.pause_timer > 100:
+                self.pause_timer = 0
+                self.cycle_proc_state = CycleProcState.CLEAR_FRAME
 
         # エラー処理
         elif self.cycle_proc_state == CycleProcState.ERROR:
+            self.pause_timer += 1
+            if self.pause_timer > 50:
+                self.pause_timer = 0
+                self.cycle_proc_state = CycleProcState.CLEAR_FRAME
+        
+        # 停止画の空読み
+        elif self.cycle_proc_state == CycleProcState.CLEAR_FRAME:
             # 停止画取得
             self.camera_get_frame()
-            # 一時停止タイマ処理
             self.pause_timer += 1
-            if self.pause_timer > FACE_DETECTIION_PAUSE_SHORT:
-                self.cycle_proc_state = CycleProcState.DETECT_FACE
+            if self.pause_timer > 10:
+                self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
 
         # 設計上ありえないがロバスト性に配慮
         else:
             print('[error] cycle_proc')
-            self.cycle_proc_state = CycleProcState.DETECT_FACE
+            self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
