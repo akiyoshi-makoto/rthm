@@ -418,7 +418,7 @@ class Application(ttk.Frame):
         # エラー処理
         elif self.cycle_proc_state == CycleProcState.ERROR:
             self.pause_timer += 1
-            if self.pause_timer > 50:
+            if self.pause_timer > 30:
                 self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.CLEAR_FRAME
         
