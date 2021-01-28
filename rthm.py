@@ -267,6 +267,48 @@ class Application(ttk.Frame):
         time.sleep(.1)
 
     ##########################################################################
+    # 体温演算
+    ##########################################################################
+    def make_body_temp(self):
+        self.label_distance1.config(text='距離(1回目)：' + str(self.distance[0]) + ' cm ')
+        self.label_distance2.config(text='距離(2回目)：' + str(self.distance[1]) + ' cm ')
+        self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
+        self.label_sns_tmp.config(text='検出温度：' + str(self.sensor_temp) + '℃')
+
+        if (self.distance[0] < DISTANCE_STANDARD and
+            self.distance[1] < DISTANCE_STANDARD):
+
+            if (self.distance[0] < 30.0 or
+                self.distance[1] < 30.0):
+                self.label_msg.config(text='もう少し離れてください')
+                result = False
+            else:
+                # 距離(平均)
+                distance_ave = round(((self.distance[0] + self.distance[1]) / 2), 1)
+                # 距離補正
+                self.corr_distance = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
+                # サーミスタ温度補正
+                self.corr_thermistor = round((0.8424 * self.thermistor_temp - 3.2523), 2)
+                # 体温
+                self.body_temp = round((self.sensor_temp - self.corr_distance + self.corr_thermistor), 1)
+
+                self.label_corr_distance.config(text='距離補正：' + str(self.corr_distance) + ' ℃')
+                self.label_corr_thermistor.config(text='サーミスタ温度補正：' + str(self.corr_thermistor) + ' ℃')
+                self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
+                
+                if self.body_temp > 38.0:
+                    self.label_msg.config(text='体温が高いです！検温してください')
+                else:
+                    self.label_msg.config(text='体温は正常です！問題ありません')
+
+                result = True
+        else:
+            self.label_msg.config(text='もう少し近づいてください') 
+            result = False
+        
+        return result
+
+    ##########################################################################
     # CSV出力の初期設定
     ##########################################################################
     def csv_init(self):
@@ -335,7 +377,7 @@ class Application(ttk.Frame):
 
         # サーマルセンサ(AMG8833) サーミスタ 温度取得
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
-            self.thermal_get_thermistor()
+            self.thermistor_temp = round(self.sensor.temperature, 2) 
             self.cycle_proc_state = CycleProcState.DISTANCE_2
  
         # 体温測定対象者までの距離計測(2回目)
@@ -345,12 +387,12 @@ class Application(ttk.Frame):
 
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
         elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
-            self.thermal_get_temperature()
+            self.sensor_temp = round(np.amax(np.array(self.sensor.pixels)), 2)
             self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
 
         # 体温演算
         elif self.cycle_proc_state == CycleProcState.MAKE_BODY_TEMP:
-            result = self.thermal_make_body_temp()
+            result = self.make_body_temp()
             if result:
                 self.cycle_proc_state = CycleProcState.UPDATE_CSV
             else:
@@ -394,62 +436,6 @@ class Application(ttk.Frame):
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
-
-    ##########################################################################
-    # サーマルセンサ(AMG8833) サーミスタ 温度取得
-    ##########################################################################
-    def thermal_get_thermistor(self):
-        # サーミスタ温度取得
-        self.thermistor_temp = round(self.sensor.temperature, 2)     
-
-    ##########################################################################
-    # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
-    ##########################################################################
-    def thermal_get_temperature(self):
-        # 検出温度取得
-        self.sensor_temp = round(np.amax(np.array(self.sensor.pixels)), 2)
-
-    ##########################################################################
-    # サーマルセンサ(AMG8833) 体温演算
-    ##########################################################################
-    def thermal_make_body_temp(self):
-        self.label_distance1.config(text='距離(1回目)：' + str(self.distance[0]) + ' cm ')
-        self.label_distance2.config(text='距離(2回目)：' + str(self.distance[1]) + ' cm ')
-        self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
-        self.label_sns_tmp.config(text='検出温度：' + str(self.sensor_temp) + '℃')
-
-        if (self.distance[0] < DISTANCE_STANDARD and
-            self.distance[1] < DISTANCE_STANDARD):
-
-            if (self.distance[0] < 30.0 or
-                self.distance[1] < 30.0):
-                self.label_msg.config(text='もう少し離れてください')
-                result = False
-            else:
-                # 距離(平均)
-                distance_ave = round(((self.distance[0] + self.distance[1]) / 2), 1)
-                # 距離補正
-                self.corr_distance = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
-                # サーミスタ温度補正
-                self.corr_thermistor = round((0.8424 * self.thermistor_temp - 3.2523), 2)
-                # 体温
-                self.body_temp = round((self.sensor_temp - self.corr_distance + self.corr_thermistor), 1)
-
-                self.label_corr_distance.config(text='距離補正：' + str(self.corr_distance) + ' ℃')
-                self.label_corr_thermistor.config(text='サーミスタ温度補正：' + str(self.corr_thermistor) + ' ℃')
-                self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
-                
-                if self.body_temp > 38.0:
-                    self.label_msg.config(text='体温が高いです！検温してください')
-                else:
-                    self.label_msg.config(text='体温は正常です！問題ありません')
-
-                result = True
-        else:
-            self.label_msg.config(text='もう少し近づいてください') 
-            result = False
-        
-        return result
 
 if __name__ == '__main__':
     root = Tk()
