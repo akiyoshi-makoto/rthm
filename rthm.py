@@ -58,11 +58,11 @@ class Application(ttk.Frame):
         # 体温測定対象者までの距離
         self.distance = [DISTANCE_STANDARD, DISTANCE_STANDARD]
         # 距離補正
-        self.corr_distance = 0.0 
+        self.distance_corr = 0.0 
         # サーミスタ温度
         self.thermistor_temp = 0.0
         # サーミスタ温度補正
-        self.corr_thermistor = 0.0
+        self.thermistor_corr = 0.0
         # 検出温度
         self.sensor_temp = BODY_TEMP_STANDARD
         # 体温
@@ -127,12 +127,12 @@ class Application(ttk.Frame):
         self.label_distance1.grid(row=0, sticky='NW')
         self.label_distance2 = ttk.Label(frame_lower)
         self.label_distance2.grid(row=1, sticky='NW')
-        self.label_corr_distance = ttk.Label(frame_lower)
-        self.label_corr_distance.grid(row=2, sticky='NW')
+        self.label_distance_corr = ttk.Label(frame_lower)
+        self.label_distance_corr.grid(row=2, sticky='NW')
         self.label_thermistor = ttk.Label(frame_lower)
         self.label_thermistor.grid(row=3, sticky='NW')
-        self.label_corr_thermistor = ttk.Label(frame_lower)
-        self.label_corr_thermistor.grid(row=4, sticky='NW')
+        self.label_thermistor_corr = ttk.Label(frame_lower)
+        self.label_thermistor_corr.grid(row=4, sticky='NW')
         self.label_sns_tmp = ttk.Label(frame_lower)
         self.label_sns_tmp.grid(row=5, sticky='NW')
 
@@ -148,9 +148,9 @@ class Application(ttk.Frame):
         # フレーム(下部)
         self.label_distance1.config(text='距離(1回目)：--- cm')
         self.label_distance2.config(text='距離(2回目)：--- cm')
-        self.label_corr_distance.config(text='距離補正：--.-- ℃')
+        self.label_distance_corr.config(text='距離補正：--.-- ℃')
         self.label_thermistor.config(text='サーミスタ温度：--.-- ℃')
-        self.label_corr_thermistor.config(text='サーミスタ温度補正：--.-- ℃')
+        self.label_thermistor_corr.config(text='サーミスタ温度補正：--.-- ℃')
         self.label_sns_tmp.config(text='検出温度：--.-- ℃')
 
     ##########################################################################
@@ -286,14 +286,14 @@ class Application(ttk.Frame):
                 # 距離(平均)
                 distance_ave = round(((self.distance[0] + self.distance[1]) / 2), 1)
                 # 距離補正
-                self.corr_distance = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
+                self.distance_corr = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
                 # サーミスタ温度補正
-                self.corr_thermistor = round((0.8424 * self.thermistor_temp - 3.2523), 2)
+                self.thermistor_corr = round((0.8424 * self.thermistor_temp - 3.2523), 2)
                 # 体温
-                self.body_temp = round((self.sensor_temp - self.corr_distance + self.corr_thermistor), 1)
+                self.body_temp = round((self.sensor_temp - self.distance_corr + self.thermistor_corr), 1)
 
-                self.label_corr_distance.config(text='距離補正：' + str(self.corr_distance) + ' ℃')
-                self.label_corr_thermistor.config(text='サーミスタ温度補正：' + str(self.corr_thermistor) + ' ℃')
+                self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
+                self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
                 self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
                 
                 if self.body_temp > 38.0:
@@ -341,9 +341,9 @@ class Application(ttk.Frame):
             # csvファイルへの書き込みデータ
             data = [self.distance[0],
                     self.distance[1],
-                    self.corr_distance,
+                    self.distance_corr,
                     self.thermistor_temp,
-                    self.corr_thermistor,
+                    self.thermistor_corr,
                     self.sensor_temp,
                     self.body_temp]
             # データの書き込み
