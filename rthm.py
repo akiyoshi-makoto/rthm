@@ -23,7 +23,7 @@ I2C_ADR = 0x68                      # I2C アドレス
 PROC_CYCLE = 30                     # 処理周期[msec]
 TRIG = 27                           # 超音波センサ(HC-SR04)端子番号 TRIG
 ECHO = 22                           # 超音波センサ(HC-SR04)端子番号 ECHO
-DISTANCE_STANDARD = 60.0            # 体温測定対象者までの距離(基準値)
+DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
 BODY_TEMP_STANDARD = 36.2           # 体温の基準値[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
@@ -289,9 +289,9 @@ class Application(ttk.Frame):
                 # 距離補正
                 self.distance_corr = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
                 # サーミスタ温度補正
-                self.thermistor_corr = round((0.8424 * (self.thermistor_temp - self.distance_corr) - 3.2523), 2)
+                self.thermistor_corr = round((-0.27877 * self.thermistor_temp + 16.56), 2)
                 # 体温
-                self.body_temp = round((self.temperature + self.thermistor_corr), 1)
+                self.body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
 
                 self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
                 self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
