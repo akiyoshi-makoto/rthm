@@ -289,17 +289,17 @@ class Application(ttk.Frame):
                 # 距離補正
                 self.distance_corr = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
                 # サーミスタ温度補正
-                self.thermistor_corr = round((0.8424 * self.thermistor_temp - 3.2523), 2)
+                self.thermistor_corr = round((0.8424 * (self.thermistor_temp - self.distance_corr) - 3.2523), 2)
                 # 体温
-                self.body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
+                self.body_temp = round((self.temperature + self.thermistor_corr), 1)
 
                 self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
                 self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
                 self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
                 
                 if self.body_temp > 38.0:
-                    self.label_msg.config(text='体温が高いです！検温してください')
-                if self.body_temp < 35.0:
+                     self.label_msg.config(text='体温が高いです！検温してください')
+                elif self.body_temp < 35.0:
                     self.label_msg.config(text='体温が低いです！検温してください')
                 else:
                     self.label_msg.config(text='体温は正常です！問題ありません')
@@ -411,14 +411,14 @@ class Application(ttk.Frame):
         # 一時停止処理
         elif self.cycle_proc_state == CycleProcState.PAUSE:
             self.pause_timer += 1
-            if self.pause_timer > 100:
+            if self.pause_timer > 80:
                 self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.CLEAR_FRAME
 
         # エラー処理
         elif self.cycle_proc_state == CycleProcState.ERROR:
             self.pause_timer += 1
-            if self.pause_timer > 30:
+            if self.pause_timer > 20:
                 self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.CLEAR_FRAME
         
