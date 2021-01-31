@@ -41,7 +41,50 @@ class CycleProcState(Enum):
     PAUSE = 6                       # 一時停止処理
     ERROR = 7                       # エラー処理
     CLEAR_FRAME = 8                 # 停止画の空読み
-    
+
+# サーミスタ温度補正
+thermistor_corr_tbl = (
+16.56,      # 0℃
+16.28,
+16.00,
+15.72,
+15.44,
+15.17,      # 5℃
+14.89,
+14.61,
+14.33,
+14.05,
+13.77,      # 10℃
+13.49,
+13.21,
+12.94,
+12.66,
+12.38,      # 15℃
+12.10,
+11.82,
+11.54,
+11.26,
+10.98,      # 20℃
+10.71,
+10.43,
+10.15,
+9.87,
+9.59,       # 25℃
+9.31,
+9.03,
+8.75,
+8.48,
+8.20,       # 30℃
+7.92,
+7.64,
+7.36,
+7.08,
+6.80,       # 35℃
+6.52,
+6.25,
+5.97,
+5.69,)
+
 ##############################################################################
 # クラス：Application
 ##############################################################################
@@ -268,13 +311,21 @@ class Application(ttk.Frame):
         time.sleep(.1)
 
     ##########################################################################
-    # 体温演算
+    # サーミスタ温度補正 作成
     ##########################################################################
-    def make_body_temp(self):
-        # 体温
-        body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
-
-        return body_temp
+    def make_thermistor_corr(self, thermistor_temp):
+        if thermistor_temp <= 0.0:
+            thermistor_temp = 0.1
+        elif thermistor_temp >= 40.0:
+            thermistor_temp = 39.9
+        else:
+            thermistor_temp = thermistor_temp
+        
+        index = int(thermistor_temp % 40)
+        thermistor_corr = thermistor_corr_tbl[index]
+  
+        # thermistor_corr = round((-0.27877 * thermistor_temp + 16.56), 2)
+        return thermistor_corr
 
     ##########################################################################
     # CSV出力の初期設定
@@ -364,8 +415,8 @@ class Application(ttk.Frame):
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
             self.thermistor_temp = round(self.sensor.temperature, 2)
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
-            # サーミスタ温度補正
-            self.thermistor_corr = round((-0.27877 * self.thermistor_temp + 16.56), 2)
+            # サーミスタ温度補正 作成
+            self.thermistor_corr = self.make_thermistor_corr(self.thermistor_temp)
             self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
 
             self.cycle_proc_state = CycleProcState.TEMPERATURE
@@ -378,7 +429,7 @@ class Application(ttk.Frame):
 
         # 体温演算
         elif self.cycle_proc_state == CycleProcState.MAKE_BODY_TEMP:
-            self.body_temp = self.make_body_temp()
+            self.body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
             self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
             if self.body_temp > 38.0:
                     self.label_msg.config(text='体温が高いです！検温してください')
