@@ -20,25 +20,27 @@ import PIL.Image, PIL.ImageTk
 # 定数
 ##############################################################################
 I2C_ADR = 0x68                      # I2C アドレス
-PROC_CYCLE = 30                     # 処理周期[msec]
+PROC_CYCLE = 50                     # 処理周期[msec]
 TRIG = 27                           # 超音波センサ(HC-SR04)端子番号 TRIG
 ECHO = 22                           # 超音波センサ(HC-SR04)端子番号 ECHO
 DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
+DISTANCE_UPPER_LIMIT = 150.0        # 体温測定対象者までの距離(上限値)
+DISTANCE_LOWER_LIMIT = 30.0         # 体温測定対象者までの距離(下限値)
+DISTANCE_RETRY = 5                  # 体温測定対象者までの距離測定 リトライ回数  
 BODY_TEMP_STANDARD = 36.2           # 体温の基準値[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
 # 周期処理状態
 class CycleProcState(Enum):
     FACE_RECOGNITION = 0            # 顔認識処理
-    DISTANCE_1 = 1                  # 体温測定対象者までの距離取得(1回目)
+    DISTANCE = 1                    # 体温測定対象者までの距離取得
     THERMISTOR = 2                  # サーマルセンサ(AMG8833) サーミスタ 温度取得
-    DISTANCE_2 = 3                  # 体温測定対象者までの距離取得(2回目)
-    TEMPERATURE = 4                 # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
-    MAKE_BODY_TEMP = 5              # 体温演算
-    UPDATE_CSV = 6                  # CSV更新処理
-    PAUSE = 7                       # 一時停止処理
-    ERROR = 8                       # エラー処理
-    CLEAR_FRAME = 9                 # 停止画の空読み
+    TEMPERATURE = 3                 # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
+    MAKE_BODY_TEMP = 4              # 体温演算
+    UPDATE_CSV = 5                  # CSV更新処理
+    PAUSE = 6                       # 一時停止処理
+    ERROR = 7                       # エラー処理
+    CLEAR_FRAME = 8                 # 停止画の空読み
     
 ##############################################################################
 # クラス：Application
@@ -56,8 +58,9 @@ class Application(ttk.Frame):
         # 一時停止タイマ
         self.pause_timer = 0
         # 体温測定対象者までの距離
-        self.distance_1 = DISTANCE_STANDARD
-        self.distance_2 = DISTANCE_STANDARD
+        self.distance = DISTANCE_STANDARD
+        # 体温測定のリトライ回数
+        self.distance_retry = 0
         # 距離補正
         self.distance_corr = 0.0 
         # サーミスタ温度
@@ -124,10 +127,8 @@ class Application(ttk.Frame):
         frame_lower = ttk.Frame(self)
         frame_lower.grid(row=2, padx=10, pady=(10,0), sticky='NW')
         
-        self.label_distance_1 = ttk.Label(frame_lower)
-        self.label_distance_1.grid(row=0, sticky='NW')
-        self.label_distance_2 = ttk.Label(frame_lower)
-        self.label_distance_2.grid(row=1, sticky='NW')
+        self.label_distance = ttk.Label(frame_lower)
+        self.label_distance.grid(row=0, sticky='NW')
         self.label_distance_corr = ttk.Label(frame_lower)
         self.label_distance_corr.grid(row=2, sticky='NW')
         self.label_thermistor = ttk.Label(frame_lower)
@@ -147,8 +148,7 @@ class Application(ttk.Frame):
         self.label_msg.config(text='顔が青枠に合うよう近づいてください')
         self.label_body_tmp.config(text='体温：--.-- ℃')
         # フレーム(下部)
-        self.label_distance_1.config(text='距離(1回目)：--- cm')
-        self.label_distance_2.config(text='距離(2回目)：--- cm')
+        self.label_distance.config(text='距離：--- cm')
         self.label_distance_corr.config(text='距離補正：--.-- ℃')
         self.label_thermistor.config(text='サーミスタ温度：--.-- ℃')
         self.label_thermistor_corr.config(text='サーミスタ温度補正：--.-- ℃')
@@ -271,45 +271,16 @@ class Application(ttk.Frame):
     # 体温演算
     ##########################################################################
     def make_body_temp(self):
-        self.label_distance_1.config(text='距離(1回目)：' + str(self.distance_1) + ' cm ')
-        self.label_distance_2.config(text='距離(2回目)：' + str(self.distance_2) + ' cm ')
-        self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
-        self.label_temperature.config(text='検出温度：' + str(self.temperature) + '℃')
+        # 距離補正
+        self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.064), 2)
+        self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
+        # サーミスタ温度補正
+        self.thermistor_corr = round((-0.27877 * self.thermistor_temp + 16.56), 2)
+        self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
+        # 体温
+        body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
 
-        if (self.distance_1 < DISTANCE_STANDARD and
-            self.distance_2 < DISTANCE_STANDARD):
-
-            if (self.distance_1 < 30.0 or
-                self.distance_2 < 30.0):
-                self.label_msg.config(text='もう少し離れてください')
-                result = False
-            else:
-                # 距離(平均)
-                distance_ave = round(((self.distance_1 + self.distance_2) / 2), 1)
-                # 距離補正
-                self.distance_corr = round(((DISTANCE_STANDARD - distance_ave) * 0.064), 2)
-                # サーミスタ温度補正
-                self.thermistor_corr = round((-0.27877 * self.thermistor_temp + 16.56), 2)
-                # 体温
-                self.body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
-
-                self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
-                self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
-                self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
-                
-                if self.body_temp > 38.0:
-                     self.label_msg.config(text='体温が高いです！検温してください')
-                elif self.body_temp < 35.0:
-                    self.label_msg.config(text='体温が低いです！検温してください')
-                else:
-                    self.label_msg.config(text='体温は正常です！問題ありません')
-
-                result = True
-        else:
-            self.label_msg.config(text='もう少し近づいてください') 
-            result = False
-        
-        return result
+        return body_temp
 
     ##########################################################################
     # CSV出力の初期設定
@@ -326,8 +297,7 @@ class Application(ttk.Frame):
         with open(self.filename, 'a', newline='') as csvfile:
             file = csv.writer(csvfile)
             # 1行目：見出し
-            file.writerow(['距離(1回目)',
-                           '距離(2回目)',
+            file.writerow(['距離',
                            '距離補正',
                            'サーミスタ温度',
                            'サーミスタ温度補正',
@@ -342,8 +312,7 @@ class Application(ttk.Frame):
         with open(self.filename, 'a', newline='') as csvfile:
             file = csv.writer(csvfile)
             # csvファイルへの書き込みデータ
-            data = [self.distance_1,
-                    self.distance_2,
+            data = [self.distance,
                     self.distance_corr,
                     self.thermistor_temp,
                     self.thermistor_corr,
@@ -362,63 +331,79 @@ class Application(ttk.Frame):
             facerect_num = self.face_recognition()
             # 認識した顔が一つの場合
             if facerect_num == 1:
-                self.cycle_proc_state = CycleProcState.DISTANCE_1
+                self.cycle_proc_state = CycleProcState.DISTANCE
                 self.label_msg.config(text='')
             # 認識した顔が複数の場合
             elif facerect_num > 1:
-                self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.ERROR
                 self.label_msg.config(text='体温計測は一人ずつです')
             # 顔認識をしなかった場合
             else:
                 self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
 
-        # 体温測定対象者までの距離計測(1回目)
-        elif self.cycle_proc_state == CycleProcState.DISTANCE_1:            
-            self.distance_1 = self.sonic_sensor_ctrl()
-            self.cycle_proc_state = CycleProcState.THERMISTOR
+        # 体温測定対象者までの距離計測
+        elif self.cycle_proc_state == CycleProcState.DISTANCE:            
+            
+            self.distance = self.sonic_sensor_ctrl()
+            self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
+
+            if self.distance > DISTANCE_UPPER_LIMIT:
+                if self.distance_retry < DISTANCE_RETRY:
+                    self.distance_retry += 1
+                else:
+                    self.distance_retry = 0
+                    self.label_msg.config(text='距離測定エラー')
+                    self.cycle_proc_state = CycleProcState.ERROR
+            elif self.distance < DISTANCE_LOWER_LIMIT:
+                self.label_msg.config(text='もう少し離れてください')
+                self.cycle_proc_state = CycleProcState.ERROR
+            elif self.distance > DISTANCE_STANDARD:
+                self.label_msg.config(text='もう少し近づいてください') 
+                self.cycle_proc_state = CycleProcState.ERROR
+            else:
+                self.cycle_proc_state = CycleProcState.THERMISTOR
 
         # サーマルセンサ(AMG8833) サーミスタ 温度取得
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
-            self.thermistor_temp = round(self.sensor.temperature, 2) 
-            self.cycle_proc_state = CycleProcState.DISTANCE_2
- 
-        # 体温測定対象者までの距離計測(2回目)
-        elif self.cycle_proc_state == CycleProcState.DISTANCE_2:            
-            self.distance_2 = self.sonic_sensor_ctrl()
+            self.thermistor_temp = round(self.sensor.temperature, 2)
+            self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
             self.cycle_proc_state = CycleProcState.TEMPERATURE
-
+ 
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
         elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
             self.temperature = round(np.amax(np.array(self.sensor.pixels)), 2)
+            self.label_temperature.config(text='検出温度：' + str(self.temperature) + '℃')
             self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
 
         # 体温演算
         elif self.cycle_proc_state == CycleProcState.MAKE_BODY_TEMP:
-            result = self.make_body_temp()
-            if result:
-                self.cycle_proc_state = CycleProcState.UPDATE_CSV
+            self.body_temp = self.make_body_temp()
+            self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
+            if self.body_temp > 38.0:
+                    self.label_msg.config(text='体温が高いです！検温してください')
+            elif self.body_temp < 35.0:
+                self.label_msg.config(text='体温が低いです！検温してください')
             else:
-                self.pause_timer = 0
-                self.cycle_proc_state = CycleProcState.ERROR
+                self.label_msg.config(text='体温は正常です！問題ありません')
+
+            self.cycle_proc_state = CycleProcState.UPDATE_CSV
    
         # CSV更新処理
         elif self.cycle_proc_state == CycleProcState.UPDATE_CSV:
             self.csv_ctrl()
-            self.pause_timer = 0
             self.cycle_proc_state = CycleProcState.PAUSE
 
         # 一時停止処理
         elif self.cycle_proc_state == CycleProcState.PAUSE:
             self.pause_timer += 1
-            if self.pause_timer > 80:
+            if self.pause_timer > 40:
                 self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.CLEAR_FRAME
 
         # エラー処理
         elif self.cycle_proc_state == CycleProcState.ERROR:
             self.pause_timer += 1
-            if self.pause_timer > 20:
+            if self.pause_timer > 10:
                 self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.CLEAR_FRAME
         
@@ -428,6 +413,7 @@ class Application(ttk.Frame):
             self.camera_get_frame()
             self.pause_timer += 1
             if self.pause_timer > 10:
+                self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
