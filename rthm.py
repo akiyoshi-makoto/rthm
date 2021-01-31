@@ -271,12 +271,6 @@ class Application(ttk.Frame):
     # 体温演算
     ##########################################################################
     def make_body_temp(self):
-        # 距離補正
-        self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.064), 2)
-        self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
-        # サーミスタ温度補正
-        self.thermistor_corr = round((-0.27877 * self.thermistor_temp + 16.56), 2)
-        self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
         # 体温
         body_temp = round((self.temperature - self.distance_corr + self.thermistor_corr), 1)
 
@@ -343,9 +337,12 @@ class Application(ttk.Frame):
 
         # 体温測定対象者までの距離計測
         elif self.cycle_proc_state == CycleProcState.DISTANCE:            
-            
+            # 距離
             self.distance = self.sonic_sensor_ctrl()
             self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
+            # 距離補正
+            self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.064), 2)
+            self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
 
             if self.distance > DISTANCE_UPPER_LIMIT:
                 if self.distance_retry < DISTANCE_RETRY:
@@ -367,6 +364,10 @@ class Application(ttk.Frame):
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
             self.thermistor_temp = round(self.sensor.temperature, 2)
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
+            # サーミスタ温度補正
+            self.thermistor_corr = round((-0.27877 * self.thermistor_temp + 16.56), 2)
+            self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
+
             self.cycle_proc_state = CycleProcState.TEMPERATURE
  
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
