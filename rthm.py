@@ -6,23 +6,19 @@ from enum import Enum
 import time
 import datetime
 import os
-import RPi.GPIO as GPIO
 import csv
-import busio
-import board
-import adafruit_amg88xx
 import cv2
 import numpy as np
 import PIL.Image, PIL.ImageTk
-
+import busio
+import board
+import adafruit_amg88xx
+import VL53L0X 
 
 ##############################################################################
 # 定数
 ##############################################################################
-I2C_ADR = 0x68                      # I2C アドレス
 PROC_CYCLE = 50                     # 処理周期[msec]
-TRIG = 27                           # 超音波センサ(HC-SR04)端子番号 TRIG
-ECHO = 22                           # 超音波センサ(HC-SR04)端子番号 ECHO
 DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
 DISTANCE_UPPER_LIMIT = 150.0        # 体温測定対象者までの距離(上限値)
 DISTANCE_LOWER_LIMIT = 30.0         # 体温測定対象者までの距離(下限値)
@@ -119,8 +115,8 @@ class Application(ttk.Frame):
         self.create_widgets()
         # カメラ
         self.camera_init()
-        # 超音波センサ(HC-SR04)
-        ret_sonic_sensor = self.sonic_sensor_init()
+        # 距離センサ(VL530X)
+        self.distance_sensor_init()
         # サーマルセンサ(AMG8833)
         self.thermal_sensor_init()
         # CSV出力の初期設定
@@ -128,8 +124,6 @@ class Application(ttk.Frame):
         
         if not self.camera.isOpened:
             messagebox.showerror('カメラ認識エラー', 'カメラの接続を確認してください')
-        elif not ret_sonic_sensor:
-            messagebox.showerror('超音波センサエラー', '超音波センサの接続を確認してください')
         else:
             # 周期処理
             self.cycle_proc()
@@ -252,52 +246,11 @@ class Application(ttk.Frame):
         return len(facerect)
 
     ##########################################################################
-    # 超音波センサ(HC-SR04) 初期化
+    # 距離センサ(VL530X) 初期化
     ##########################################################################
-    def sonic_sensor_init(self):
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(TRIG, GPIO.OUT)
-        GPIO.setup(ECHO, GPIO.IN)
-        GPIO.output(TRIG, GPIO.LOW)
-
-        # Trig端子を10us以上High
-        GPIO.output(TRIG, GPIO.HIGH)
-        time.sleep(0.00001)
-        GPIO.output(TRIG, GPIO.LOW)
-        
-        time1 = time.time()
-        result = True
-        # EchoパルスがHighになる時間
-        while GPIO.input(ECHO) == 0:
-            time2 = time.time()
-            time_chk = time2 - time1
-            if time_chk > 0.001:
-                result = False
-                break
-        return result
-
-    ##########################################################################
-    # 超音波センサ(HC-SR04) 距離取得
-    ##########################################################################
-    def sonic_sensor_ctrl(self):
-        # Trig端子を10us以上High
-        GPIO.output(TRIG, GPIO.HIGH)
-        time.sleep(0.00001)
-        GPIO.output(TRIG, GPIO.LOW)
-        # EchoパルスがHighになる時間
-        while GPIO.input(ECHO) == 0:
-            echo_on = time.time()
-        # EchoパルスがLowになる時間
-        while GPIO.input(ECHO) == 1:
-            echo_off = time.time()
-        # Echoパルスのパルス幅(us)
-        echo_pulse_width = (echo_off - echo_on) * 1000000
-        # print(echo_pulse_width)
-        # 距離を算出:Distance in cm = echo pulse width in uS/58
-        distance = round((echo_pulse_width / 58), 1)
-
-        return distance
+    def distance_sensor_init(self):
+        self.distance_sensor = VL53L0X.VL53L0X(address=0x29)
+        self.distance_sensor.start_ranging(VL53L0X.VL53L0X_BETTER_ACCURACY_MODE)
 
     ##########################################################################
     # サーマルセンサ(AMG8833) 初期化
@@ -306,7 +259,7 @@ class Application(ttk.Frame):
         # I2Cバスの初期化
         i2c_bus = busio.I2C(board.SCL, board.SDA)
         # センサの初期化
-        self.sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=I2C_ADR)
+        self.thermal_sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=0x68)
         # センサの初期化待ち
         time.sleep(.1)
 
@@ -389,7 +342,7 @@ class Application(ttk.Frame):
         # 体温測定対象者までの距離計測
         elif self.cycle_proc_state == CycleProcState.DISTANCE:            
             # 距離
-            self.distance = self.sonic_sensor_ctrl()
+            self.distance = self.distance_sensor.get_distance()/float(10)
             self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
             # 距離補正
             self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.064), 2)
@@ -413,7 +366,7 @@ class Application(ttk.Frame):
 
         # サーマルセンサ(AMG8833) サーミスタ 温度取得
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
-            self.thermistor_temp = round(self.sensor.temperature, 2)
+            self.thermistor_temp = round(self.thermal_sensor.temperature, 2)
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
             # サーミスタ温度補正 作成
             self.thermistor_corr = self.make_thermistor_corr(self.thermistor_temp)
@@ -423,7 +376,7 @@ class Application(ttk.Frame):
  
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
         elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
-            self.temperature = round(np.amax(np.array(self.sensor.pixels)), 2)
+            self.temperature = round(np.amax(np.array(self.thermal_.pixels)), 2)
             self.label_temperature.config(text='検出温度：' + str(self.temperature) + '℃')
             self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
 
@@ -482,5 +435,3 @@ if __name__ == '__main__':
     root = Tk()
     app = Application(master=root)
     app.mainloop()
-    # 終了処理
-    GPIO.cleanup()
