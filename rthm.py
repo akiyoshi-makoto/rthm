@@ -260,9 +260,7 @@ class Application(ttk.Frame):
         i2c_bus = busio.I2C(board.SCL, board.SDA)
         # センサの初期化
         self.thermal_sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=0x68)
-        # センサの初期化待ち
-        time.sleep(.1)
-
+ 
     ##########################################################################
     # サーミスタ温度補正 作成
     ##########################################################################
@@ -376,7 +374,7 @@ class Application(ttk.Frame):
  
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
         elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
-            self.temperature = round(np.amax(np.array(self.thermal_.pixels)), 2)
+            self.temperature = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
             self.label_temperature.config(text='検出温度：' + str(self.temperature) + '℃')
             self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
 
