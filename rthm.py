@@ -19,11 +19,10 @@ import VL53L0X
 # 定数
 ##############################################################################
 PROC_CYCLE = 50                     # 処理周期[msec]
-DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
-DISTANCE_UPPER_LIMIT = 150.0        # 体温測定対象者までの距離(上限値)
+DISTANCE_STANDARD = 40.0            # 体温測定対象者までの距離(基準値)
+DISTANCE_UPPER_LIMIT = 100.0        # 体温測定対象者までの距離(上限値)
 DISTANCE_LOWER_LIMIT = 30.0         # 体温測定対象者までの距離(下限値)
 DISTANCE_RETRY = 5                  # 体温測定対象者までの距離測定 リトライ回数  
-BODY_TEMP_STANDARD = 36.2           # 体温の基準値[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
 # 周期処理状態
@@ -37,49 +36,6 @@ class CycleProcState(Enum):
     PAUSE = 6                       # 一時停止処理
     ERROR = 7                       # エラー処理
     CLEAR_FRAME = 8                 # 停止画の空読み
-
-# サーミスタ温度補正
-thermistor_corr_tbl = (
-15.74,      # 0℃
-15.46,
-15.19,
-14.91,
-14.63,
-14.35,      # 5℃
-14.07,
-13.79,
-13.51,
-13.23,
-12.95,      # 10℃
-12.67,
-12.40,
-12.12,
-11.84,
-11.56,      # 15℃
-11.28,
-11.00,
-10.72,
-10.44,
-10.16,      # 20℃
-9.88,
-9.60,
-9.32,
-9.04,
-8.76,       # 25℃
-8.48,
-8.20,
-7.92,
-7.65,
-7.37,       # 30℃
-7.09,
-6.81,
-6.53,
-6.25,
-5.97,       # 35℃
-5.69,
-5.41,
-5.13,
-4.85,)
 
 ##############################################################################
 # クラス：Application
@@ -106,10 +62,10 @@ class Application(ttk.Frame):
         self.thermistor_temp = 0.0
         # サーミスタ温度補正
         self.thermistor_corr = 0.0
-        # 検出温度
-        self.temperature = BODY_TEMP_STANDARD
+        # センサ温度
+        self.temperature = 0.0
         # 体温
-        self.body_temp = BODY_TEMP_STANDARD
+        self.body_temp = 0.0
 
         # ウィジットを生成
         self.create_widgets()
@@ -140,7 +96,7 @@ class Application(ttk.Frame):
         master.geometry(str(w)+'x'+str(h)+'+'+str(int(sw/2-w/2))+'+'+str(int(sh/2-h/2)))
         # ウィンドウの最小サイズを指定
         master.minsize(w,h)
-        master.title('体温測定システム')
+        master.title('非接触体温計')
     
     ##########################################################################
     # ウィジットを生成
@@ -164,16 +120,16 @@ class Application(ttk.Frame):
         frame_lower = ttk.Frame(self)
         frame_lower.grid(row=2, padx=10, pady=(10,0), sticky='NW')
         
+        self.label_temperature = ttk.Label(frame_lower)
+        self.label_temperature.grid(row=0, sticky='NW')
         self.label_distance = ttk.Label(frame_lower)
-        self.label_distance.grid(row=0, sticky='NW')
+        self.label_distance.grid(row=1, sticky='NW')
         self.label_distance_corr = ttk.Label(frame_lower)
         self.label_distance_corr.grid(row=2, sticky='NW')
         self.label_thermistor = ttk.Label(frame_lower)
         self.label_thermistor.grid(row=3, sticky='NW')
         self.label_thermistor_corr = ttk.Label(frame_lower)
         self.label_thermistor_corr.grid(row=4, sticky='NW')
-        self.label_temperature = ttk.Label(frame_lower)
-        self.label_temperature.grid(row=5, sticky='NW')
 
         self.init_param_widgets()
 
@@ -185,11 +141,11 @@ class Application(ttk.Frame):
         self.label_msg.config(text='顔が青枠に合うよう近づいてください')
         self.label_body_tmp.config(text='体温：--.-- ℃')
         # フレーム(下部)
+        self.label_temperature.config(text='センサ温度：--.-- ℃')
         self.label_distance.config(text='距離：--- cm')
         self.label_distance_corr.config(text='距離補正：--.-- ℃')
         self.label_thermistor.config(text='サーミスタ温度：--.-- ℃')
         self.label_thermistor_corr.config(text='サーミスタ温度補正：--.-- ℃')
-        self.label_temperature.config(text='検出温度：--.-- ℃')
 
     ##########################################################################
     # カメラ　初期化
@@ -262,59 +218,45 @@ class Application(ttk.Frame):
         self.thermal_sensor = adafruit_amg88xx.AMG88XX(i2c_bus, addr=0x68)
  
     ##########################################################################
-    # サーミスタ温度補正 作成
-    ##########################################################################
-    def make_thermistor_corr(self, thermistor_temp):
-        if thermistor_temp <= 0.0:
-            thermistor_temp = 0.1
-        elif thermistor_temp >= 40.0:
-            thermistor_temp = 39.9
-        else:
-            thermistor_temp = thermistor_temp
-        
-        index = int(thermistor_temp % 40)
-        thermistor_corr = thermistor_corr_tbl[index]
-  
-        # thermistor_corr = round((-0.27877 * thermistor_temp + 16.56), 2)
-        return thermistor_corr
-
-    ##########################################################################
     # CSV出力の初期設定
     ##########################################################################
     def csv_init(self):
         # フォルダの存在チェック
         if not os.path.isdir(LOG_PATH):
             os.makedirs(LOG_PATH)
-        # 現在時刻取得
-        now = datetime.datetime.today()     
-        now_str = now.strftime('%y%m%d-%H%M%S')
+        # 日付取得
+        now = datetime.datetime.today()
         # csvファイルの生成
-        self.filename = LOG_PATH + now_str + '.csv'
-        with open(self.filename, 'a', newline='') as csvfile:
-            file = csv.writer(csvfile)
-            # 1行目：見出し
-            file.writerow(['距離',
-                           '距離補正',
-                           'サーミスタ温度',
-                           'サーミスタ温度補正',
-                           '検出温度',
-                           '体温'])
+        self.filename = LOG_PATH + now.strftime('%y%m%d') + '.csv'
+        # ファイルの存在チェック
+        if not os.path.isfile(self.filename):
+            with open(self.filename, 'w', newline='') as csvfile:
+                file = csv.writer(csvfile)
+                # 1行目：見出し
+                file.writerow(['時刻',
+                               '体温',
+                               'センサ温度',
+                               '距離',
+                               '距離補正',
+                               'サーミスタ温度',
+                               'サーミスタ温度補正'])
 
     ##########################################################################
     # CSV出力
     ##########################################################################
     def csv_ctrl(self):
-        # csvファイルの生成
         with open(self.filename, 'a', newline='') as csvfile:
-            file = csv.writer(csvfile)
             # csvファイルへの書き込みデータ
-            data = [self.distance,
+            now = datetime.datetime.today()
+            data = [now.strftime('%H:%M:%S'),
+                    self.body_temp,
+                    self.temperature,
+                    self.distance,
                     self.distance_corr,
                     self.thermistor_temp,
-                    self.thermistor_corr,
-                    self.temperature,
-                    self.body_temp]
+                    self.thermistor_corr]
             # データの書き込み
+            file = csv.writer(csvfile)
             file.writerow(data)
 
     ##########################################################################
@@ -367,7 +309,7 @@ class Application(ttk.Frame):
             self.thermistor_temp = round(self.thermal_sensor.temperature, 2)
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
             # サーミスタ温度補正 作成
-            self.thermistor_corr = self.make_thermistor_corr(self.thermistor_temp)
+            self.thermistor_corr = round((-0.27 * self.thermistor_temp + 15.5), 2)
             self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
 
             self.cycle_proc_state = CycleProcState.TEMPERATURE
@@ -375,7 +317,7 @@ class Application(ttk.Frame):
         # サーマルセンサ(AMG8833) 赤外線アレイセンサ 検出温度取得
         elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
             self.temperature = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
-            self.label_temperature.config(text='検出温度：' + str(self.temperature) + '℃')
+            self.label_temperature.config(text='センサ温度：' + str(self.temperature) + '℃')
             self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
 
         # 体温演算
@@ -399,7 +341,7 @@ class Application(ttk.Frame):
         # 一時停止処理
         elif self.cycle_proc_state == CycleProcState.PAUSE:
             self.pause_timer += 1
-            if self.pause_timer > 40:
+            if self.pause_timer > 20:
                 self.pause_timer = 0
                 self.cycle_proc_state = CycleProcState.CLEAR_FRAME
 
