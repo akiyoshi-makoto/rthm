@@ -138,7 +138,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def init_param_widgets(self):        
         # フレーム(上部)
-        self.label_msg.config(text='顔が青枠に合うよう近づいてください')
+        self.label_msg.config(text='顔が白枠に合うよう近づいてください')
         self.label_body_tmp.config(text='体温：--.-- ℃')
         # フレーム(下部)
         self.label_temperature.config(text='センサ温度：--.-- ℃')
@@ -189,11 +189,11 @@ class Application(ttk.Frame):
             cv2.rectangle(frame_color,
                             tuple(rect[0:2]),
                             tuple(rect[0:2]+rect[2:4]),
-                            (0, 255, 0),
-                            thickness=3)
+                            (0, 0, 255),
+                            thickness=5)
 
         # ガイド枠の描画
-        cv2.rectangle(frame_color, (60,60), (420,420), (0,0,255), thickness=3)
+        cv2.rectangle(frame_color, (60,60), (420,420), (255,255,255), thickness=5)
         # OpenCV frame -> Pillow Photo
         self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
         # Pillow Photo -> Canvas
@@ -285,7 +285,7 @@ class Application(ttk.Frame):
             self.distance = self.distance_sensor.get_distance()/float(10)
             self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
             # 距離補正
-            self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.064), 2)
+            self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.05), 2)
             self.label_distance_corr.config(text='距離補正：' + str(self.distance_corr) + ' ℃')
 
             if self.distance > DISTANCE_UPPER_LIMIT:
@@ -308,8 +308,12 @@ class Application(ttk.Frame):
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
             self.thermistor_temp = round(self.thermal_sensor.temperature, 2)
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
-            # サーミスタ温度補正 作成
-            self.thermistor_corr = round((-0.27 * self.thermistor_temp + 15.5), 2)
+            # サーミスタ温度補正
+            if self.thermistor_temp >= 25.0:
+                self.thermistor_corr = round((-0.18 * self.thermistor_temp + 15.0), 2)
+            else:
+                self.thermistor_corr = round((-0.27 * self.thermistor_temp + 15.0), 2)
+            
             self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
 
             self.cycle_proc_state = CycleProcState.TEMPERATURE
