@@ -19,29 +19,20 @@ import VL53L0X
 # 定数
 ##############################################################################
 PROC_CYCLE = 50                     # 処理周期[msec]
-DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
+DISTANCE_STANDARD = 40.0            # 体温測定対象者までの距離(基準値)
 DISTANCE_UPPER_LIMIT = 100.0        # 体温測定対象者までの距離(上限値)
 DISTANCE_LOWER_LIMIT = 30.0         # 体温測定対象者までの距離(下限値)
-DISTANCE_RETRY = 2                  # 体温測定対象者までの距離測定 リトライ回数  
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
 # 周期処理状態
 class CycleProcState(Enum):
-    FACE_RECOGNITION = 0            # 顔認識処理
-    TEMPERATURE_0 = 1               # 赤外線センサ値取得(1回目)
-    DISTANCE = 2                    # 体温測定対象者までの距離取得
-    TEMPERATURE_1 = 3               # 赤外線センサ値取得(2回目)
-    THERMISTOR = 4                  # サーミスタ値取得
-    TEMPERATURE_2 = 5               # 赤外線センサ値取得(3回目)
-    DUMMY_0 = 6                     # ダミー
-    TEMPERATURE_3 = 7               # 赤外線センサ値取得(4回目)
-    DUMMY_1 = 8                     # ダミー
-    TEMPERATURE_4 = 9               # 赤外線センサ値取得(5回目)
-    MAKE_BODY_TEMP = 10             # 体温演算
-    UPDATE_CSV = 11                 # CSV更新処理
-    PAUSE = 12                      # 一時停止処理
-    ERROR = 13                      # エラー処理
-    CLEAR_FRAME = 14                # 停止画の空読み
+    FACE_DETECTION = 0              # 顔検出
+    THERMISTOR = 1                  # サーミスタ温度
+    TEMPERATURE = 2                 # 赤外線センサ温度
+    DUMMY = 3                       # ダミー
+    MAKE_BODY_TEMP = 4              # 体温演算
+    UPDATE_CSV = 5                  # CSV更新処理
+    PAUSE = 6                       # 一時停止
 
 ##############################################################################
 # クラス：Application
@@ -55,19 +46,21 @@ class Application(ttk.Frame):
         self.setting_window(master)
 
         # 周期処理状態
-        self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
+        self.cycle_proc_state = CycleProcState.FACE_DETECTION
+        # 距離計測タイマ
+        self.distance_timer = 0
         # 一時停止タイマ
         self.pause_timer = 0
         # 体温測定対象者までの距離
         self.distance = DISTANCE_STANDARD
-        # 体温測定のリトライ回数
-        self.distance_retry = 0
         # 距離補正
         self.distance_corr = 0.0 
         # サーミスタ温度
         self.thermistor_temp = 0.0
         # サーミスタ温度補正
         self.thermistor_corr = 0.0
+        # 赤外線センサ温度(インデックス)
+        self.temperature_index = 0
         # 赤外線センサ温度
         self.temperature = [0.0, 0.0, 0.0, 0.0, 0.0]
         # 赤外線センサ温度(中央値)
@@ -171,7 +164,7 @@ class Application(ttk.Frame):
         self.label_thermistor_corr.config(text='サーミスタ温度補正：--.-- ℃')
 
     ##########################################################################
-    # カメラ　初期化
+    # カメラ初期化
     ##########################################################################
     def camera_init(self):   
         self.camera = cv2.VideoCapture(0)
@@ -184,17 +177,32 @@ class Application(ttk.Frame):
         self.face_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
 
     ##########################################################################
-    # 停止画取得
+    # カメラ制御
     ##########################################################################
-    def camera_get_frame(self):
-        # 停止画を取得
+    def camera_ctrl(self):
         ret, frame = self.camera.read()
-    
+        # 左右反転
+        frame_mirror = cv2.flip(frame, 1)
+        # OpenCV(BGR) -> Pillow(RGB)変換
+        frame_color = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
+        # ガイド枠の描画
+        cv2.rectangle(frame_color, (60,60), (420,420), (255,255,255), thickness=5)
+        # OpenCV frame -> Pillow Photo
+        self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(frame_color))
+        # Pillow Photo -> Canvas
+        self.canvas_camera.create_image(0, 0, image = self.photo, anchor = 'nw')
+
+    ##########################################################################
+    # カメラ映像の空読み
+    ##########################################################################
+    def camera_clear_frame(self):
+        ret, frame = self.camera.read()
+
     ##########################################################################
     # 顔認識処理
     ##########################################################################
     def face_recognition(self):
-        # 停止画を取得
+        # カメラ映像を取得
         ret, frame = self.camera.read()
         # 左右反転
         frame_mirror = cv2.flip(frame, 1)
@@ -286,94 +294,71 @@ class Application(ttk.Frame):
     # 周期処理
     ##########################################################################
     def cycle_proc(self):
-        # 顔認識待ち
-        if self.cycle_proc_state == CycleProcState.FACE_RECOGNITION:
-            # 顔認識処理
-            facerect_num = self.face_recognition()
-            # 認識した顔が一つの場合
-            if facerect_num == 1:
-                self.cycle_proc_state = CycleProcState.TEMPERATURE_0
-                self.label_msg.config(text='')
-            # 認識した顔が複数の場合
-            elif facerect_num > 1:
-                self.cycle_proc_state = CycleProcState.ERROR
-                self.label_msg.config(text='体温計測は一人ずつです')
-            # 顔認識をしなかった場合
-            else:
-                self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
+        # 顔検出
+        if self.cycle_proc_state == CycleProcState.FACE_DETECTION:
+            # カメラ制御
+            self.camera_ctrl()
+            # 距離計測
+            self.distance_timer += 1
+            if self.distance_timer >= 10:
+                self.distance_timer = 0
+                self.distance = self.distance_sensor.get_distance() / float(10)
+                self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
 
-        # 赤外線センサ値取得(1回目)
-        elif self.cycle_proc_state == CycleProcState.TEMPERATURE_0:
-            # print(self.thermal_sensor.pixels)
-            self.temperature[0] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
-            self.label_temperature_0.config(text='センサ温度(1回目)：' + str(self.temperature[0]) + '℃')
-            self.cycle_proc_state = CycleProcState.DISTANCE
-
-        # 体温測定対象者までの距離計測
-        elif self.cycle_proc_state == CycleProcState.DISTANCE:            
-            # 距離
-            self.distance = self.distance_sensor.get_distance()/float(10)
-            self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
-
-            if self.distance > DISTANCE_UPPER_LIMIT:
-                if self.distance_retry < DISTANCE_RETRY:
-                    self.distance_retry += 1
+                if self.distance > DISTANCE_UPPER_LIMIT:
+                    self.label_msg.config(text='顔が白枠に合うよう近づいてください')
+                elif self.distance < DISTANCE_LOWER_LIMIT:
+                    self.label_msg.config(text='もう少し離れてください')
+                elif self.distance > DISTANCE_STANDARD:
+                    self.label_msg.config(text='もう少し近づいてください')
                 else:
-                    self.distance_retry = 0
-                    self.label_msg.config(text='距離測定エラー')
-                    self.cycle_proc_state = CycleProcState.ERROR
-            elif self.distance < DISTANCE_LOWER_LIMIT:
-                self.label_msg.config(text='もう少し離れてください')
-                self.cycle_proc_state = CycleProcState.ERROR
-            elif self.distance > DISTANCE_STANDARD:
-                self.label_msg.config(text='もう少し近づいてください') 
-                self.cycle_proc_state = CycleProcState.ERROR
-            else:
-                self.cycle_proc_state = CycleProcState.TEMPERATURE_1
+                    self.label_msg.config(text='')
+                    self.cycle_proc_state = CycleProcState.THERMISTOR
 
-        # 赤外線センサ値取得(2回目)
-        elif self.cycle_proc_state == CycleProcState.TEMPERATURE_1:
-            self.temperature[1] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
-            self.label_temperature_1.config(text='センサ温度(2回目)：' + str(self.temperature[1]) + '℃')
-            self.cycle_proc_state = CycleProcState.THERMISTOR
-
-        # サーミスタ値取得
+        # サーミスタ温度
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
             self.thermistor_temp = round(self.thermal_sensor.temperature, 2)
             # サーミスタの下限値を設定
             if self.thermistor_temp < 0.0:
                 self.thermistor_temp = 0.0
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
+            self.cycle_proc_state = CycleProcState.TEMPERATURE
 
-            self.cycle_proc_state = CycleProcState.TEMPERATURE_2
+        # 赤外線センサ温度
+        elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
+            # print(self.thermal_sensor.pixels)
+            self.temperature[self.temperature_index] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
+            self.cycle_proc_state = CycleProcState.DUMMY
+        
+        # ダミー
+        elif self.cycle_proc_state == CycleProcState.DUMMY:
+            if self.temperature_index == 0:
+                self.label_temperature_0.config(text='センサ温度(1回目)：' + str(self.temperature[0]) + '℃')
+                self.temperature_index = 1
+                self.cycle_proc_state = CycleProcState.TEMPERATURE
+            elif self.temperature_index == 1:
+                self.label_temperature_1.config(text='センサ温度(2回目)：' + str(self.temperature[1]) + '℃')
+                self.temperature_index = 2
+                self.cycle_proc_state = CycleProcState.TEMPERATURE
+            elif self.temperature_index == 2:
+                self.label_temperature_2.config(text='センサ温度(3回目)：' + str(self.temperature[2]) + '℃')
+                self.temperature_index = 3
+                self.cycle_proc_state = CycleProcState.TEMPERATURE
+            elif self.temperature_index == 3:
+                self.label_temperature_3.config(text='センサ温度(4回目)：' + str(self.temperature[3]) + '℃')
+                self.temperature_index = 4
+                self.cycle_proc_state = CycleProcState.TEMPERATURE
+            elif self.temperature_index == 4:
+                self.label_temperature_4.config(text='センサ温度(5回目)：' + str(self.temperature[4]) + '℃')
+                self.temperature_index = 0
+                self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
+            else:
+                # 設計上ありえないがロバスト性に配慮
+                print('[error] index')
+                self.temperature_index = 0
+                self.cycle_proc_state = CycleProcState.FACE_DETECTION               
 
-        # 赤外線センサ値取得(3回目)
-        elif self.cycle_proc_state == CycleProcState.TEMPERATURE_2:
-            self.temperature[2] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
-            self.label_temperature_2.config(text='センサ温度(3回目)：' + str(self.temperature[2]) + '℃')
-            self.cycle_proc_state = CycleProcState.DUMMY_0
-
-        # 何もしない
-        elif self.cycle_proc_state == CycleProcState.DUMMY_0:
-            self.cycle_proc_state = CycleProcState.TEMPERATURE_3
-
-       # 赤外線センサ値取得(4回目)
-        elif self.cycle_proc_state == CycleProcState.TEMPERATURE_3:
-            self.temperature[3] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
-            self.label_temperature_3.config(text='センサ温度(4回目)：' + str(self.temperature[3]) + '℃')
-            self.cycle_proc_state = CycleProcState.DUMMY_1
-
-        # 何もしない
-        elif self.cycle_proc_state == CycleProcState.DUMMY_1:
-            self.cycle_proc_state = CycleProcState.TEMPERATURE_4
-
-        # 赤外線センサ値取得(5回目)
-        elif self.cycle_proc_state == CycleProcState.TEMPERATURE_4:
-            self.temperature[4] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
-            self.label_temperature_4.config(text='センサ温度(5回目)：' + str(self.temperature[4]) + '℃')
-            self.cycle_proc_state = CycleProcState.MAKE_BODY_TEMP
-
-        # 体温演算
+       # 体温演算
         elif self.cycle_proc_state == CycleProcState.MAKE_BODY_TEMP:
             # 距離補正
             self.distance_corr = round(((DISTANCE_STANDARD - self.distance) * 0.064), 2)
@@ -414,35 +399,21 @@ class Application(ttk.Frame):
             self.csv_ctrl()
             self.cycle_proc_state = CycleProcState.PAUSE
 
-        # 一時停止処理
+        # 一時停止
         elif self.cycle_proc_state == CycleProcState.PAUSE:
+            # カメラ映像の空読み
+            self.camera_clear_frame()
             self.pause_timer += 1
-            if self.pause_timer > 20:
+            if self.pause_timer > 60:
                 self.pause_timer = 0
-                self.cycle_proc_state = CycleProcState.CLEAR_FRAME
-
-        # エラー処理
-        elif self.cycle_proc_state == CycleProcState.ERROR:
-            self.pause_timer += 1
-            if self.pause_timer > 10:
-                self.pause_timer = 0
-                self.cycle_proc_state = CycleProcState.CLEAR_FRAME
-        
-        # 停止画の空読み
-        elif self.cycle_proc_state == CycleProcState.CLEAR_FRAME:
-            # 停止画取得
-            self.camera_get_frame()
-            self.pause_timer += 1
-            if self.pause_timer > 5:
-                self.pause_timer = 0
-                self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
+                self.cycle_proc_state = CycleProcState.FACE_DETECTION
 
         # 設計上ありえないがロバスト性に配慮
         else:
             print('[error] cycle_proc')
-            self.cycle_proc_state = CycleProcState.FACE_RECOGNITION
+            self.cycle_proc_state = CycleProcState.FACE_DETECTION
 
         # 周期処理
         self.after(PROC_CYCLE, self.cycle_proc)
