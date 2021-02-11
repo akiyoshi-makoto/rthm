@@ -22,8 +22,9 @@ PROC_CYCLE = 50                     # 処理周期[msec]
 DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
 DISTANCE_UPPER_LIMIT = 100.0        # 体温測定対象者までの距離(上限値)
 DISTANCE_LOWER_LIMIT = 30.0         # 体温測定対象者までの距離(下限値)
-THERMISTOR_CORR_STANDARD = 9.0     # サーミスタ温度補正(基準値)
+THERMISTOR_CORR_STANDARD = 10.0     # サーミスタ温度補正(基準値)
 BODY_TEMP_STANDARD = 36.2           # 体温(基準値)
+TARGET_DIFF = 0.5                   # 学習目標との差分
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
 # 周期処理状態
@@ -53,6 +54,8 @@ class Application(ttk.Frame):
         self.distance_timer = 0
         # 一時停止タイマ
         self.pause_timer = 0
+        # 校正状態
+        self.is_calib_end = False
         # 体温測定対象者までの距離
         self.distance = DISTANCE_STANDARD
         # サーミスタ温度
@@ -143,7 +146,10 @@ class Application(ttk.Frame):
     ##########################################################################
     def init_param_widgets(self):        
         # フレーム(上部)
-        self.label_msg.config(text='顔が白枠に合うよう近づいてください')
+        if self.is_calib_end:
+            self.label_msg.config(text='顔が白枠に合うよう近づいてください')
+        else:
+            self.label_msg.config(text='平熱の人で検温を行ってください')
         self.label_body_tmp.config(text='体温：--.-- ℃')
         # フレーム(下部)
         self.label_distance.config(text='距離：--- cm')
@@ -313,9 +319,19 @@ class Application(ttk.Frame):
             self.temperature_med = round(self.temperature[1], 2)
             self.label_temperature_med.config(text='センサ温度(中央値)：' + str(self.temperature_med) + '℃')
             # サーミスタ温度補正
-            risou = BODY_TEMP_STANDARD - self.temperature_med
-            self.thermistor_corr = round(self.thermistor_corr + (risou - self.thermistor_corr) / 10, 2)
+            diff = BODY_TEMP_STANDARD - self.temperature_med
+            corr = diff - self.thermistor_corr
+            print(corr)
+            if corr > 0.0:
+                self.thermistor_corr = round((self.thermistor_corr + (corr / 20)), 2)
+            else:
+                self.thermistor_corr = round((self.thermistor_corr + (corr / 10)), 2)
             self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
+            # 校正状態
+            if corr > TARGET_DIFF:
+                self.is_calib_end = False
+            else:
+                self.is_calib_end = True
             # 体温
             self.body_temp = round((self.temperature_med + self.thermistor_corr), 1)
             self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
