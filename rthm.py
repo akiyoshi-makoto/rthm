@@ -258,15 +258,15 @@ class Application(ttk.Frame):
         # 日付取得
         now = datetime.datetime.today()
         # csvファイルの生成
-        self.filename = LOG_PATH + now.strftime('%y%m%d') + '.csv'
+        self.filename = LOG_PATH + now.strftime('%Y-%m') + '.csv'
         # ファイルの存在チェック
         if not os.path.isfile(self.filename):
             with open(self.filename, 'w', newline='') as csvfile:
                 file = csv.writer(csvfile)
                 # 1行目：見出し
-                file.writerow(['時刻',
+                file.writerow(['日時',
                                '体温',
-                               '赤外線センサ',
+                               'センサ温度',
                                '距離',
                                '距離補正',
                                'サーミスタ',
@@ -279,7 +279,7 @@ class Application(ttk.Frame):
         with open(self.filename, 'a', newline='') as csvfile:
             # csvファイルへの書き込みデータ
             now = datetime.datetime.today()
-            data = [now.strftime('%H:%M:%S'),
+            data = [now.strftime('%Y-%m-%d %H:%M:%S'),
                     self.body_temp,
                     self.temperature_med,
                     self.distance,
@@ -303,17 +303,20 @@ class Application(ttk.Frame):
             if self.distance_timer >= 10:
                 self.distance_timer = 0
                 self.distance = self.distance_sensor.get_distance() / float(10)
-                self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
 
                 if self.distance > DISTANCE_UPPER_LIMIT:
                     self.label_msg.config(text='顔が白枠に合うよう近づいてください')
-                elif self.distance < DISTANCE_LOWER_LIMIT:
-                    self.label_msg.config(text='もう少し離れてください')
-                elif self.distance > DISTANCE_STANDARD:
-                    self.label_msg.config(text='もう少し近づいてください')
+                    self.label_distance.config(text='距離：--- cm')
                 else:
-                    self.label_msg.config(text='')
-                    self.cycle_proc_state = CycleProcState.THERMISTOR
+                    if self.distance < DISTANCE_LOWER_LIMIT:
+                        self.label_msg.config(text='もう少し離れてください')
+                    elif self.distance > DISTANCE_STANDARD:
+                        self.label_msg.config(text='もう少し近づいてください')
+                    else:
+                        self.label_msg.config(text='')
+                        self.cycle_proc_state = CycleProcState.THERMISTOR
+
+                    self.label_distance.config(text='距離：' + str(self.distance) + ' cm ')
 
         # サーミスタ温度
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
@@ -326,13 +329,14 @@ class Application(ttk.Frame):
 
         # 赤外線センサ温度
         elif self.cycle_proc_state == CycleProcState.TEMPERATURE:
-            # print(self.thermal_sensor.pixels)
             self.temperature[self.temperature_index] = round(np.amax(np.array(self.thermal_sensor.pixels)), 2)
             self.cycle_proc_state = CycleProcState.DUMMY
         
         # ダミー
         elif self.cycle_proc_state == CycleProcState.DUMMY:
             if self.temperature_index == 0:
+                print('AAAA')
+                print(*self.thermal_sensor.pixels, sep='\n')
                 self.label_temperature_0.config(text='センサ温度(1回目)：' + str(self.temperature[0]) + '℃')
                 self.temperature_index = 1
                 self.cycle_proc_state = CycleProcState.TEMPERATURE
@@ -404,7 +408,7 @@ class Application(ttk.Frame):
             # カメラ映像の空読み
             self.camera_clear_frame()
             self.pause_timer += 1
-            if self.pause_timer > 60:
+            if self.pause_timer > 50:
                 self.pause_timer = 0
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
