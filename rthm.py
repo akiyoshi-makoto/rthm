@@ -71,7 +71,7 @@ class Application(ttk.Frame):
         # 赤外線センサ温度
         self.temperature = [0.0, 0.0, 0.0, 0.0, 0.0]
         # 赤外線センサ温度(中央値)
-        self.temperature_ave = 0.0
+        self.temperature_med = 0.0
         # 体温
         self.body_temp = 0.0
 
@@ -127,7 +127,7 @@ class Application(ttk.Frame):
         # フレーム(下部)
         frame_lower = ttk.Frame(self)
         frame_lower.grid(row=2, padx=10, pady=(10,0), sticky='NW')
-        
+
         self.label_temperature_0 = ttk.Label(frame_lower)
         self.label_temperature_0.grid(row=0, sticky='NW')
         self.label_temperature_1 = ttk.Label(frame_lower)
@@ -138,8 +138,8 @@ class Application(ttk.Frame):
         self.label_temperature_3.grid(row=3, sticky='NW')
         self.label_temperature_4 = ttk.Label(frame_lower)
         self.label_temperature_4.grid(row=4, sticky='NW')
-        self.label_temperature_ave = ttk.Label(frame_lower)
-        self.label_temperature_ave.grid(row=5, sticky='NW')
+        self.label_temperature_med = ttk.Label(frame_lower)
+        self.label_temperature_med.grid(row=5, sticky='NW')
         self.label_distance = ttk.Label(frame_lower)
         self.label_distance.grid(row=6, sticky='NW')
         self.label_distance_corr = ttk.Label(frame_lower)
@@ -164,7 +164,7 @@ class Application(ttk.Frame):
         self.label_temperature_2.config(text='センサ温度(3回目)：--.-- ℃')
         self.label_temperature_3.config(text='センサ温度(4回目)：--.-- ℃')
         self.label_temperature_4.config(text='センサ温度(5回目)：--.-- ℃')
-        self.label_temperature_ave.config(text='センサ温度(中央値)：--.-- ℃')
+        self.label_temperature_med.config(text='センサ温度(中央値)：--.-- ℃')
         self.label_distance.config(text='距離：--- cm')
         self.label_distance_corr.config(text='距離補正：--.-- ℃')
         self.label_thermistor.config(text='サーミスタ温度：--.-- ℃')
@@ -273,7 +273,7 @@ class Application(ttk.Frame):
             now = datetime.datetime.today()
             data = [now.strftime('%H:%M:%S'),
                     self.body_temp,
-                    self.temperature_ave,
+                    self.temperature_med,
                     self.distance,
                     self.distance_corr,
                     self.thermistor_temp,
@@ -395,10 +395,10 @@ class Application(ttk.Frame):
             self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
             # 赤外線センサ温度(中央値)
             self.temperature.sort()
-            self.temperature_ave = round(self.temperature[2], 2)
-            self.label_temperature_ave.config(text='センサ温度(中央値)：' + str(self.temperature_ave) + '℃')
+            self.temperature_med = round(self.temperature[2], 2)
+            self.label_temperature_med.config(text='センサ温度(中央値)：' + str(self.temperature_med) + '℃')
             # 体温
-            self.body_temp = round((self.temperature_ave - self.distance_corr + self.thermistor_corr), 1)
+            self.body_temp = round((self.temperature_med - self.distance_corr + self.thermistor_corr), 1)
             self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
             if self.body_temp > 38.0:
                     self.label_msg.config(text='体温が高いです！検温してください')
