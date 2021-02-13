@@ -19,12 +19,12 @@ import VL53L0X
 # 定数
 ##############################################################################
 PROC_CYCLE = 50                     # 処理周期[msec]
-DISTANCE_STANDARD = 50.0            # 体温測定対象者までの距離(基準値)
-DISTANCE_UPPER_LIMIT = 100.0        # 体温測定対象者までの距離(上限値)
-DISTANCE_LOWER_LIMIT = 30.0         # 体温測定対象者までの距離(下限値)
-THERMISTOR_CORR_STANDARD = 10.0     # サーミスタ温度補正(基準値)
-BODY_TEMP_STANDARD = 36.2           # 体温(基準値)
-TARGET_DIFF = 0.5                   # 学習目標との差分
+DISTANCE_STANDARD = 50.0            # 距離(基準値)[cm]
+DISTANCE_UPPER_LIMIT = 100.0        # 距離(上限値)[cm]
+DISTANCE_LOWER_LIMIT = 30.0         # 距離(下限値)[cm]
+THERMISTOR_CORR_STANDARD = 10.0     # サーミスタ温度補正(基準値)[℃]
+BODY_TEMP_STANDARD = 36.2           # 体温(基準値)[℃]
+TARGET_DIFF = 0.5                   # 学習目標との差分[℃]
 LOG_PATH = './log_file/'            # ログファイル保存パス
 
 # 周期処理状態
@@ -34,7 +34,7 @@ class CycleProcState(Enum):
     TEMPERATURE = 2                 # 赤外線センサ温度
     DUMMY = 3                       # ダミー
     MAKE_BODY_TEMP = 4              # 体温演算
-    UPDATE_CSV = 5                  # CSV更新処理
+    UPDATE_CSV = 5                  # CSV更新
     PAUSE = 6                       # 一時停止
 
 ##############################################################################
@@ -54,9 +54,7 @@ class Application(ttk.Frame):
         self.distance_timer = 0
         # 一時停止タイマ
         self.pause_timer = 0
-        # 校正状態
-        self.is_calib_end = False
-        # 体温測定対象者までの距離
+        # 距離
         self.distance = DISTANCE_STANDARD
         # サーミスタ温度
         self.thermistor_temp = 0.0
@@ -93,7 +91,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def setting_window(self, master):
         w = 500                             # ウィンドウの横幅
-        h = 860                             # ウィンドウの高さ
+        h = 800                             # ウィンドウの高さ
         sw = master.winfo_screenwidth()     # スクリーンの横幅
         sh = master.winfo_screenheight()    # スクリーンの高さ
         # ウィンドウをスクリーンの中央に配置
@@ -146,10 +144,7 @@ class Application(ttk.Frame):
     ##########################################################################
     def init_param_widgets(self):        
         # フレーム(上部)
-        if self.is_calib_end:
-            self.label_msg.config(text='顔が白枠に合うよう近づいてください')
-        else:
-            self.label_msg.config(text='平熱の人で検温を行ってください')
+        self.label_msg.config(text='顔が白枠に合うよう近づいてください')
         self.label_body_tmp.config(text='体温：--.-- ℃')
         # フレーム(下部)
         self.label_distance.config(text='距離：--- cm')
@@ -279,9 +274,6 @@ class Application(ttk.Frame):
         # サーミスタ温度
         elif self.cycle_proc_state == CycleProcState.THERMISTOR:
             self.thermistor_temp = round(self.thermal_sensor.temperature, 2)
-            # サーミスタの下限値を設定
-            if self.thermistor_temp < 0.0:
-                self.thermistor_temp = 0.0
             self.label_thermistor.config(text='サーミスタ温度：' + str(self.thermistor_temp) + ' ℃')
             self.cycle_proc_state = CycleProcState.TEMPERATURE
 
@@ -322,16 +314,8 @@ class Application(ttk.Frame):
             diff = BODY_TEMP_STANDARD - self.temperature_med
             corr = diff - self.thermistor_corr
             print(corr)
-            if corr > 0.0:
-                self.thermistor_corr = round((self.thermistor_corr + (corr / 20)), 2)
-            else:
-                self.thermistor_corr = round((self.thermistor_corr + (corr / 10)), 2)
+            self.thermistor_corr = round((self.thermistor_corr + (corr / 10)), 2)
             self.label_thermistor_corr.config(text='サーミスタ温度補正：' + str(self.thermistor_corr) + ' ℃')
-            # 校正状態
-            if corr > TARGET_DIFF:
-                self.is_calib_end = False
-            else:
-                self.is_calib_end = True
             # 体温
             self.body_temp = round((self.temperature_med + self.thermistor_corr), 1)
             self.label_body_tmp.config(text='体温：' + str(self.body_temp) + '℃')
@@ -344,7 +328,7 @@ class Application(ttk.Frame):
 
             self.cycle_proc_state = CycleProcState.UPDATE_CSV
    
-        # CSV更新処理
+        # CSV更新
         elif self.cycle_proc_state == CycleProcState.UPDATE_CSV:
             self.csv_ctrl()
             self.cycle_proc_state = CycleProcState.PAUSE
