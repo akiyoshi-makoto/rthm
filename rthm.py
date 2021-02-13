@@ -253,7 +253,7 @@ class Application(ttk.Frame):
             self.camera_ctrl()
             # 距離計測
             self.distance_timer += 1
-            if self.distance_timer >= 10:
+            if self.distance_timer >= 5:
                 self.distance_timer = 0
                 self.distance = self.distance_sensor.get_distance() / float(10)
 
@@ -338,7 +338,7 @@ class Application(ttk.Frame):
             # カメラ映像の空読み
             self.camera_clear_frame()
             self.pause_timer += 1
-            if self.pause_timer > 10:
+            if self.pause_timer > 20:
                 self.pause_timer = 0
                 # 計測データ ウィジット 初期化
                 self.init_param_widgets()
